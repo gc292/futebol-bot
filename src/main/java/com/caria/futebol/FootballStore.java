@@ -10,19 +10,23 @@ import java.sql.*;
 import java.time.Instant;
 import java.util.*;
 
-/** SQLite is the source of truth. Every operation uses a short, isolated transaction. */
+/** Shared SQLite or MariaDB persistence. Each operation uses an isolated transaction. */
 final class FootballStore {
     private final String url;
     private final SQLiteConfig config = new SQLiteConfig();
+    private final Properties connectionProperties;
+    private final boolean maria;
 
     FootballStore(Path database) {
         try {
             Path absolute = database.toAbsolutePath();
             Files.createDirectories(absolute.getParent());
             url = "jdbc:sqlite:" + absolute;
+            maria = false;
             config.enforceForeignKeys(true);
             config.setBusyTimeout(10_000);
             config.setTransactionMode(SQLiteConfig.TransactionMode.IMMEDIATE);
+            connectionProperties=config.toProperties();
             try (Connection connection = open(); Statement statement = connection.createStatement()) {
                 try (ResultSet version = statement.executeQuery("PRAGMA user_version")) {
                     if (version.next() && version.getInt(1) > 1)
@@ -41,16 +45,42 @@ final class FootballStore {
         }
     }
 
+    static FootballStore fromEnvironment(Map<String,String> env) {
+        String jdbc=env.getOrDefault("FOOTBALL_DB_URL","");
+        if (jdbc.isBlank()) return new FootballStore(Path.of(env.getOrDefault("FOOTBALL_DB_PATH","data/football.db")));
+        String user=env.getOrDefault("FOOTBALL_DB_USER","");
+        if (user.isBlank() || !env.containsKey("FOOTBALL_DB_PASSWORD"))
+            throw new IllegalArgumentException("Set FOOTBALL_DB_USER and FOOTBALL_DB_PASSWORD with FOOTBALL_DB_URL.");
+        return new FootballStore(jdbc,user,env.get("FOOTBALL_DB_PASSWORD"));
+    }
+    FootballStore(String jdbc,String user,String password) {
+        if (jdbc==null || !jdbc.startsWith("jdbc:mariadb://")) throw new IllegalArgumentException("FOOTBALL_DB_URL must start with jdbc:mariadb://.");
+        url=jdbc; maria=true; connectionProperties=new Properties();
+        connectionProperties.setProperty("user",user); connectionProperties.setProperty("password",password);
+        connectionProperties.setProperty("connectTimeout","10000"); connectionProperties.setProperty("socketTimeout","30000");
+        try (Connection c=open(); Statement statement=c.createStatement()) {
+            try (var resource=FootballStore.class.getResourceAsStream("/schema-mariadb.sql")) {
+                if (resource==null) throw new IllegalStateException("Missing MariaDB schema.");
+                for (String sql:new String(resource.readAllBytes(),StandardCharsets.UTF_8).split(";")) if (!sql.isBlank()) statement.execute(sql);
+            }
+            try (ResultSet version=statement.executeQuery("SELECT version FROM schema_metadata WHERE id=1")) {
+                if (!version.next() || version.getInt(1)!=1) throw new IllegalStateException("Unsupported MariaDB schema version.");
+            }
+        } catch (SQLException | IOException error) { throw new IllegalStateException("Cannot initialize MariaDB football database",error); }
+    }
+
     private static String timestamp(Instant instant) {
         return new java.time.format.DateTimeFormatterBuilder().appendInstant(9).toFormatter().format(instant);
     }
 
-    private Connection open() throws SQLException { return DriverManager.getConnection(url, config.toProperties()); }
+    private Connection open() throws SQLException { return DriverManager.getConnection(url, connectionProperties); }
     @FunctionalInterface private interface Work<T> { T run(Connection connection) throws SQLException; }
     @FunctionalInterface private interface Mapper<T> { T map(ResultSet result) throws SQLException; }
 
     private synchronized <T> T transaction(Work<T> work) {
         try (Connection connection = open()) {
+            if (maria && one(connection,"SELECT GET_LOCK(CONCAT('football:',LEFT(SHA2(DATABASE(),256),48)),10)",r -> r.getInt(1))!=1)
+                throw new FootballException("The database is busy. Try again shortly.");
             connection.setAutoCommit(false);
             try {
                 T value = work.run(connection);
@@ -59,6 +89,10 @@ final class FootballStore {
             } catch (SQLException | RuntimeException error) {
                 connection.rollback();
                 throw error;
+            } finally {
+                if (maria) try (Statement release=connection.createStatement()) {
+                    release.execute("SELECT RELEASE_LOCK(CONCAT('football:',LEFT(SHA2(DATABASE(),256),48)))");
+                }
             }
         } catch (SQLException e) {
             throw new IllegalStateException("Football database operation failed", e);
@@ -66,6 +100,11 @@ final class FootballStore {
     }
 
     private static PreparedStatement prepare(Connection c, String sql, Object... args) throws SQLException {
+        if (!c.getMetaData().getURL().startsWith("jdbc:sqlite:")) sql=sql
+                .replace("INSERT OR IGNORE","INSERT IGNORE")
+                .replace("ON CONFLICT(guild_id,name) DO NOTHING","ON DUPLICATE KEY UPDATE name=VALUES(name)")
+                .replace("ON CONFLICT(poll_id,voter_id) DO UPDATE SET score=excluded.score","ON DUPLICATE KEY UPDATE score=VALUES(score)")
+                .replace("last_insert_rowid()","LAST_INSERT_ID()");
         PreparedStatement statement = c.prepareStatement(sql);
         for (int i = 0; i < args.length; i++) statement.setObject(i + 1, args[i]);
         return statement;
@@ -107,15 +146,177 @@ final class FootballStore {
                 String name = PlayerCatalog.PLAYERS.get(i);
                 execute(c, """
                         INSERT INTO players(guild_id,name,rating,roster_order) VALUES(?,?,?,?)
-                        ON CONFLICT(guild_id,name) DO UPDATE SET rating=excluded.rating, roster_order=excluded.roster_order
+                        ON CONFLICT(guild_id,name) DO NOTHING
                         """, guildId, name, PlayerCatalog.rankOf(name), i);
             }
             return null;
         });
     }
     List<Player> players(String guildId) {
-        return transaction(c -> query(c, "SELECT * FROM players WHERE guild_id=? ORDER BY roster_order,id",
-                FootballStore::readPlayer, guildId));
+        return transaction(c -> query(c, "SELECT * FROM players WHERE guild_id=? AND id NOT IN (SELECT player_id FROM removed_players WHERE guild_id=?) ORDER BY roster_order,id",
+                FootballStore::readPlayer, guildId, guildId));
+    }
+    /** Keep player identities and past match memberships intact. */
+    void removePlayer(String guildId, long id) {
+        transaction(c -> {
+            player(c,guildId,id);
+            execute(c,"INSERT OR IGNORE INTO removed_players(guild_id,player_id,removed_at) VALUES(?,?,?)",guildId,id,timestamp(Instant.now()));
+            return null;
+        });
+    }
+    private static void requireRosterPlayer(Connection c, String guildId, long id) throws SQLException {
+        player(c,guildId,id);
+        if (!query(c,"SELECT player_id FROM removed_players WHERE guild_id=? AND player_id=?",r -> r.getLong(1),guildId,id).isEmpty())
+            throw new FootballException("This player has been removed. Refresh the player list.");
+    }
+    Player addPlayer(String guildId, String name, double rating) {
+        return addPlayer(guildId, name, rating, null);
+    }
+    RatingPoll addPlayerForVoting(String guildId, String name) {
+        String pollId = UUID.randomUUID().toString();
+        addPlayer(guildId, name, 0, pollId);
+        return ratingPoll(guildId, pollId);
+    }
+    private Player addPlayer(String guildId, String name, double rating, String pollId) {
+        if (name == null || name.strip().isEmpty() || name.strip().length() > 80)
+            throw new FootballException("Enter a player name (1–80 characters).");
+        if (!Double.isFinite(rating) || rating < 0 || rating > 100)
+            throw new FootballException("Rating must be between 0 and 100.");
+        String clean = name.strip();
+        return transaction(c -> addPlayer(c,guildId,clean,rating,pollId));
+    }
+    private Player addPlayer(Connection c,String guildId,String clean,double rating,String pollId) throws SQLException {
+            List<Long> existing=query(c,"SELECT id FROM players WHERE guild_id=? AND lower(name)=lower(?)",r -> r.getLong(1),guildId,clean);
+            long playerId;
+            if (!existing.isEmpty()) {
+                playerId=existing.get(0);
+                if (execute(c,"DELETE FROM removed_players WHERE guild_id=? AND player_id=?",guildId,playerId)==0)
+                    throw new FootballException("A player with that name already exists.");
+                // Reuse the historical identity, but start a new rating vote when re-added.
+                execute(c,"DELETE FROM rating_polls WHERE guild_id=? AND player_id=?",guildId,playerId);
+                execute(c,"UPDATE players SET rating=? WHERE guild_id=? AND id=?",rating,guildId,playerId);
+            } else {
+                execute(c, "INSERT INTO players(guild_id,name,rating,roster_order) SELECT ?,?,?,COALESCE(MAX(roster_order),-1)+1 FROM players WHERE guild_id=?",
+                        guildId, clean, rating, guildId);
+                playerId = lastId(c);
+            }
+            if (pollId != null) execute(c, "INSERT INTO rating_polls(id,guild_id,player_id,updated_at) VALUES(?,?,?,?)",
+                    pollId, guildId, playerId, timestamp(Instant.now()));
+            return player(c, guildId, playerId);
+    }
+    private static RatingPoll readPoll(ResultSet r) throws SQLException {
+        double average = r.getDouble("average");
+        Double nullableAverage = r.wasNull() ? null : average;
+        return new RatingPoll(r.getString("id"),r.getString("guild_id"),r.getLong("player_id"),r.getString("name"),
+                r.getString("form_url"),r.getString("status"),r.getInt("vote_count"),nullableAverage,r.getString("updated_at"));
+    }
+    boolean nativePoll(String id) {
+        return transaction(c -> !query(c,"SELECT poll_id FROM native_polls WHERE poll_id=?",r -> r.getString(1),id).isEmpty());
+    }
+    RatingPoll addNativePoll(String guildId, String name) {
+        // Player, poll and voting mode must become visible together.
+        return transaction(c -> {
+            if (name == null || name.strip().isEmpty() || name.strip().length() > 80) throw new FootballException("Enter a player name (1-80 characters).");
+            String id=UUID.randomUUID().toString();
+            addPlayer(c,guildId,name.strip(),0,id);
+            RatingPoll poll=one(c,"SELECT rp.*,p.name FROM rating_polls rp JOIN players p ON p.id=rp.player_id WHERE rp.id=?",FootballStore::readPoll,id);
+            execute(c,"INSERT INTO native_polls(poll_id) VALUES(?)",poll.id());
+            execute(c,"UPDATE rating_polls SET status='OPEN',form_url=? WHERE id=?","/vote?id="+poll.id(),poll.id());
+            return one(c,"SELECT rp.*,p.name FROM rating_polls rp JOIN players p ON p.id=rp.player_id WHERE rp.id=?",FootballStore::readPoll,poll.id());
+        });
+    }
+    Double ownRatingVote(String guildId, String id, String voter) {
+        ratingPoll(guildId,id);
+        return transaction(c -> {
+            List<Double> votes=query(c,"SELECT score FROM rating_votes WHERE poll_id=? AND voter_id=?",r -> r.getDouble(1),id,voter);
+            return votes.isEmpty() ? null : votes.get(0);
+        });
+    }
+    void castRatingVote(String guildId, String id, String voter, double score) {
+        if (voter == null || voter.isBlank()) throw new FootballException("Open the voting link first.");
+        if (!Double.isFinite(score) || score < 0 || score > 100) throw new FootballException("Enter a score between 0 and 100.");
+        transaction(c -> {
+            RatingPoll poll=one(c,"SELECT rp.*,p.name FROM rating_polls rp JOIN players p ON p.id=rp.player_id WHERE rp.guild_id=? AND rp.id=?",FootballStore::readPoll,guildId,id);
+            requireRosterPlayer(c,guildId,poll.playerId());
+            if (!poll.status().equals("OPEN") || query(c,"SELECT poll_id FROM native_polls WHERE poll_id=?",r -> r.getString(1),id).isEmpty())
+                throw new FootballException("Voting is closed or unavailable.");
+            execute(c,"INSERT INTO rating_votes(poll_id,voter_id,score) VALUES(?,?,?) ON CONFLICT(poll_id,voter_id) DO UPDATE SET score=excluded.score",id,voter,score);
+            refreshNativeAverage(c,guildId,poll,false);
+            return null;
+        });
+    }
+    private void refreshNativeAverage(Connection c,String guildId,RatingPoll poll,boolean close) throws SQLException {
+        List<Double> scores=query(c,"SELECT score FROM rating_votes WHERE poll_id=?",r -> r.getDouble(1),poll.id());
+        if (scores.isEmpty()) throw new FootballException("At least one vote is required to finish voting.");
+        double average=scores.stream().mapToDouble(Double::doubleValue).average().orElseThrow();
+        execute(c,"UPDATE rating_polls SET vote_count=?,average=?,status=?,updated_at=? WHERE guild_id=? AND id=?",scores.size(),average,close ? "CLOSED" : "OPEN",timestamp(Instant.now()),guildId,poll.id());
+        execute(c,"UPDATE players SET rating=? WHERE guild_id=? AND id=?",average,guildId,poll.playerId());
+        if (close) execute(c,"DELETE FROM rating_votes WHERE poll_id=?",poll.id());
+    }
+    void closeNativePoll(String guildId,String id) {
+        transaction(c -> {
+            RatingPoll poll=one(c,"SELECT rp.*,p.name FROM rating_polls rp JOIN players p ON p.id=rp.player_id WHERE rp.guild_id=? AND rp.id=?",FootballStore::readPoll,guildId,id);
+            requireRosterPlayer(c,guildId,poll.playerId());
+            if (poll.status().equals("CLOSED")) return null;
+            if (query(c,"SELECT poll_id FROM native_polls WHERE poll_id=?",r -> r.getString(1),id).isEmpty()) throw new FootballException("This is an older Google poll.");
+            refreshNativeAverage(c,guildId,poll,true);
+            return null;
+        });
+    }
+    void finishSavedGooglePoll(String guildId,String id) {
+        transaction(c -> {
+            RatingPoll poll=one(c,"SELECT rp.*,p.name FROM rating_polls rp JOIN players p ON p.id=rp.player_id WHERE rp.guild_id=? AND rp.id=?",FootballStore::readPoll,guildId,id);
+            requireRosterPlayer(c,guildId,poll.playerId());
+            if (poll.status().equals("CLOSED")) return null;
+            if (poll.voteCount()==0 || poll.average()==null) throw new FootballException("This older poll has no saved votes. Remove and re-add the player to start website voting or enter a score.");
+            execute(c,"UPDATE rating_polls SET status='CLOSED',updated_at=? WHERE guild_id=? AND id=?",timestamp(Instant.now()),guildId,id);
+            return null;
+        });
+    }
+    List<RatingPoll> ratingPolls(String guildId) {
+        return transaction(c -> query(c,"SELECT rp.*,p.name FROM rating_polls rp JOIN players p ON p.id=rp.player_id AND p.guild_id=rp.guild_id WHERE rp.guild_id=? AND p.id NOT IN (SELECT player_id FROM removed_players WHERE guild_id=rp.guild_id) ORDER BY p.id DESC",FootballStore::readPoll,guildId));
+    }
+    RatingPoll ratingPoll(String guildId, String id) {
+        return transaction(c -> one(c,"SELECT rp.*,p.name FROM rating_polls rp JOIN players p ON p.id=rp.player_id AND p.guild_id=rp.guild_id WHERE rp.guild_id=? AND rp.id=? AND p.id NOT IN (SELECT player_id FROM removed_players WHERE guild_id=rp.guild_id)",FootballStore::readPoll,guildId,id));
+    }
+    void attachRatingForm(String guildId, String id, String url) {
+        transaction(c -> { execute(c,"UPDATE rating_polls SET form_url=?,status='OPEN',updated_at=? WHERE guild_id=? AND id=? AND status='CREATING'",url,timestamp(Instant.now()),guildId,id); return null; });
+    }
+    void updateRatingVotes(String guildId, String id, List<Double> scores, boolean closed) {
+        for (double value : scores) if (!Double.isFinite(value) || value < 0 || value > 100)
+            throw new FootballException("Google returned an invalid score.");
+        if (closed && scores.isEmpty()) throw new FootballException("At least one vote is required to finish voting.");
+        Double average = scores.isEmpty() ? null : scores.stream().mapToDouble(Double::doubleValue).average().orElseThrow();
+        transaction(c -> {
+            RatingPoll poll = one(c,"SELECT rp.*,p.name FROM rating_polls rp JOIN players p ON p.id=rp.player_id WHERE rp.guild_id=? AND rp.id=?",FootballStore::readPoll,guildId,id);
+            requireRosterPlayer(c,guildId,poll.playerId());
+            if (poll.status().equals("CLOSED")) return null;
+            if (!poll.status().equals("OPEN")) throw new FootballException("Create the Google Form first.");
+            execute(c,"UPDATE rating_polls SET vote_count=?,average=?,status=?,updated_at=? WHERE guild_id=? AND id=?",
+                    scores.size(),average,closed ? "CLOSED" : "OPEN",timestamp(Instant.now()),guildId,id);
+            execute(c,"UPDATE players SET rating=? WHERE guild_id=? AND id=?",average == null ? 0.0 : average,guildId,poll.playerId());
+            // Queue cleanup in the same transaction as the final saved rating.
+            if (closed) execute(c,"INSERT OR IGNORE INTO rating_cleanup(poll_id,guild_id) VALUES(?,?)",id,guildId);
+            return null;
+        });
+    }
+    List<String> pendingRatingCleanup(String guildId) {
+        return transaction(c -> query(c,"SELECT poll_id FROM rating_cleanup WHERE guild_id=? AND complete=0",r -> r.getString(1),guildId));
+    }
+    boolean ratingCleanupPending(String guildId, String id) {
+        return transaction(c -> !query(c,"SELECT poll_id FROM rating_cleanup WHERE guild_id=? AND poll_id=? AND complete=0",r -> r.getString(1),guildId,id).isEmpty());
+    }
+    void finishRatingCleanup(String guildId, String id) {
+        transaction(c -> {
+            execute(c,"UPDATE rating_cleanup SET complete=1 WHERE guild_id=? AND poll_id=?",guildId,id);
+            execute(c,"UPDATE rating_polls SET form_url=NULL WHERE guild_id=? AND id=? AND status='CLOSED'",guildId,id);
+            return null;
+        });
+    }
+    List<Player> ratedPlayers(String guildId) {
+        Set<Long> awaiting = new HashSet<>();
+        for (RatingPoll poll : ratingPolls(guildId)) if (poll.voteCount() == 0) awaiting.add(poll.playerId());
+        return players(guildId).stream().filter(p -> !awaiting.contains(p.id())).toList();
     }
     Player player(String guildId, long id) { return transaction(c -> player(c, guildId, id)); }
     private static Player player(Connection c, String guildId, long id) throws SQLException {
@@ -176,7 +377,7 @@ final class FootballStore {
         Set<Long> seen = new HashSet<>();
         for (List<Long> team : List.of(a, b)) for (Long id : team) {
             if (id == null || !seen.add(id)) throw new FootballException("A player cannot appear twice or in both teams.");
-            player(c, guildId, id);
+            requireRosterPlayer(c, guildId, id);
         }
     }
     private static TeamDivision insertDivision(Connection c, String guildId, String channelId, String userId,

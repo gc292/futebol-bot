@@ -9,3 +9,9 @@ data
 *.db
 *.db-wal
 *.db-shm
+
+# Private Sigma configuration and generated migration/deployment files
+sigma/private/config.php
+sigma-deploy
+football-export*.json
+__pycache__

@@ -1,6 +1,7 @@
 .gradle
 .env
 .env.*
+!.env.web.example
 data/
 *.db
 *.db-wal
@@ -47,3 +48,13 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+# Sigma credentials, exports and generated deployment bundles
+sigma/private/config.php
+sigma-deploy/
+football-export*.json
+
+# Local editor settings and Python caches
+.idea/
+__pycache__/
+*.pyc

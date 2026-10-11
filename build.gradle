@@ -11,11 +11,20 @@ repositories {
 }
 
 dependencies {
+    implementation 'com.google.code.gson:gson:2.11.0'
     implementation 'net.dv8tion:JDA:5.0.0-beta.24'
     implementation 'org.xerial:sqlite-jdbc:3.46.1.0'
+    implementation 'org.mariadb.jdbc:mariadb-java-client:3.5.10'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testImplementation 'org.mockito:mockito-core:5.12.0'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
+}
+
+tasks.register('runWeb', JavaExec) {
+    group = 'application'
+    description = 'Run the website against the shared football database'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.caria.futebol.WebMain'
 }
 
 test {
@@ -28,6 +37,10 @@ application {
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+        languageVersion = JavaLanguageVersion.of(JavaVersion.current().majorVersion.toInteger())
     }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
 }

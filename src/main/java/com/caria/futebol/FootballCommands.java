@@ -16,7 +16,7 @@ final class FootballCommands {
                 .addChoice("Goal difference", "GOAL_DIFFERENCE").addChoice("Best win streak", "BEST_WIN_STREAK");
         return List.of(
                 Commands.slash("futebol", "Start attendance check (fixed panel with buttons)").setGuildOnly(true),
-                Commands.slash("teams", "Generate fair 5v5 teams using decimal ranks (0.0–10.0)").setGuildOnly(true),
+                Commands.slash("teams", "Generate fair 5v5 teams using player ratings").setGuildOnly(true),
                 Commands.slash("remake", "Remake teams (random, may be less fair)").setGuildOnly(true),
                 Commands.slash("profile", "View a player's football statistics").setGuildOnly(true).addOptions(user, player),
                 Commands.slash("leaderboard", "Rank football players").setGuildOnly(true).addOptions(metric),
@@ -45,7 +45,7 @@ final class FootballCommands {
     }
     private static OptionData rosterOption(String name, String description, boolean required) {
         OptionData option = new OptionData(OptionType.STRING, name, description, required);
-        for (String player : PlayerCatalog.PLAYERS) option.addChoice(player, player);
+        // Free text allows database players added through the website.
         return option;
     }
 }

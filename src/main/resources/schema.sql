@@ -84,4 +84,37 @@ CREATE TABLE IF NOT EXISTS draft_players (
     FOREIGN KEY(guild_id, draft_id) REFERENCES drafts(guild_id, id),
     FOREIGN KEY(guild_id, player_id) REFERENCES players(guild_id, id)
 );
+CREATE TABLE IF NOT EXISTS rating_polls (
+    id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    player_id INTEGER NOT NULL,
+    form_url TEXT,
+    status TEXT NOT NULL DEFAULT 'CREATING' CHECK(status IN ('CREATING','OPEN','CLOSED')),
+    vote_count INTEGER NOT NULL DEFAULT 0,
+    average REAL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(guild_id,player_id),
+    FOREIGN KEY(guild_id,player_id) REFERENCES players(guild_id,id)
+);
+CREATE TABLE IF NOT EXISTS removed_players (
+    guild_id TEXT NOT NULL,
+    player_id INTEGER NOT NULL,
+    removed_at TEXT NOT NULL,
+    PRIMARY KEY(guild_id,player_id),
+    FOREIGN KEY(guild_id,player_id) REFERENCES players(guild_id,id)
+);
+CREATE TABLE IF NOT EXISTS rating_cleanup (
+    poll_id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL REFERENCES guild_settings(guild_id),
+    complete INTEGER NOT NULL DEFAULT 0 CHECK(complete IN (0,1))
+);
+CREATE TABLE IF NOT EXISTS native_polls (
+    poll_id TEXT PRIMARY KEY REFERENCES rating_polls(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS rating_votes (
+    poll_id TEXT NOT NULL REFERENCES native_polls(poll_id) ON DELETE CASCADE,
+    voter_id TEXT NOT NULL,
+    score REAL NOT NULL CHECK(score >= 0 AND score <= 100),
+    PRIMARY KEY(poll_id,voter_id)
+);
 PRAGMA user_version = 1;

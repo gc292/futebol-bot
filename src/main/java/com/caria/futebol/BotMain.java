@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static com.caria.futebol.PlayerCatalog.PLAYERS;
+
 import static com.caria.futebol.BotMessages.attendancePrompt;
 import static com.caria.futebol.BotMessages.attendanceSummary;
 import static com.caria.futebol.BotMessages.formatTeamsMessage;
@@ -51,8 +51,7 @@ public class BotMain extends ListenerAdapter {
             throw new IllegalStateException("Missing environment variable: DISCORD_TOKEN");
         }
 
-        String databasePath = System.getenv().getOrDefault("FOOTBALL_DB_PATH", "data/football.db");
-        FootballStore store = new FootballStore(Path.of(databasePath));
+        FootballStore store = FootballStore.fromEnvironment(System.getenv());
 
         // Build JDA and attach the existing and statistics listeners.
         JDA jda = JDABuilder.createDefault(token)
@@ -102,7 +101,7 @@ public class BotMain extends ListenerAdapter {
             return;
         }
 
-        Session session = new Session(event.getUser().getId(), event.getChannel().getId(), PLAYERS);
+        Session session = new Session(event.getUser().getId(), event.getChannel().getId(), store.ratedPlayers(event.getGuild().getId()).stream().map(Player::name).toList());
         SESSIONS.put(key, session);
 
         // Send ONE fixed panel message and store its messageId.
@@ -124,8 +123,8 @@ public class BotMain extends ListenerAdapter {
         List<String> confirmed = confirmedForTeams(event);
         if (confirmed == null) return;
 
-        Pick10Result pick = pickBest10ForBalance(confirmed);
-        Teams teams = splitIntoBalanced5v5(pick.chosenPlayers);
+        Pick10Result pick = pickBest10ForBalance(confirmed, ratings(event.getGuild().getId()));
+        Teams teams = splitIntoBalanced5v5(pick.chosenPlayers, ratings(event.getGuild().getId()));
         TeamDivision division = store.saveGeneratedDivision(event.getGuild().getId(), event.getChannel().getId(),
                 event.getUser().getId(), teams.teamA, teams.teamB, "TEAMS");
 
@@ -134,7 +133,7 @@ public class BotMain extends ListenerAdapter {
                 teams,
                 pick.substitutes,
                 pick.bestDifference,
-                false
+                false, ratings(event.getGuild().getId())
         ) + "\n\nSaved division **#" + division.id() + "**. After the game, use **/result generated**.").queue();
     }
 
@@ -149,7 +148,7 @@ public class BotMain extends ListenerAdapter {
         if (confirmed == null) return;
 
         Pick10Result pick = pickRandom10(confirmed);
-        Teams teams = splitRandom5v5(pick.chosenPlayers);
+        Teams teams = splitRandom5v5(pick.chosenPlayers, ratings(event.getGuild().getId()));
         TeamDivision division = store.saveGeneratedDivision(event.getGuild().getId(), event.getChannel().getId(),
                 event.getUser().getId(), teams.teamA, teams.teamB, "REMAKE");
 
@@ -158,7 +157,7 @@ public class BotMain extends ListenerAdapter {
                 teams,
                 pick.substitutes,
                 -1.0,
-                true
+                true, ratings(event.getGuild().getId())
         ) + "\n\nSaved division **#" + division.id() + "**. After the game, use **/result generated**.").queue();
     }
 
@@ -166,6 +165,10 @@ public class BotMain extends ListenerAdapter {
     private List<String> confirmedForTeams(SlashCommandInteractionEvent event) {
         String channelId = event.getGuild().getId() + ":" + event.getChannel().getId();
         List<String> confirmed = LAST_CONFIRMED_BY_CHANNEL.get(channelId);
+        if (confirmed != null) {
+            java.util.Set<String> available = new java.util.HashSet<>(store.ratedPlayers(event.getGuild().getId()).stream().map(Player::name).toList());
+            confirmed = confirmed.stream().filter(available::contains).toList();
+        }
 
         if (confirmed == null || confirmed.isEmpty()) {
             event.reply("No confirmed list found for this channel yet. Run **/futebol** first.")
@@ -242,6 +245,12 @@ public class BotMain extends ListenerAdapter {
                     )
                     .queue();
         }
+    }
+
+    private java.util.function.ToDoubleFunction<String> ratings(String guildId) {
+        Map<String, Double> ratings = new java.util.HashMap<>();
+        for (Player player : store.players(guildId)) ratings.put(player.name(), player.rating());
+        return name -> ratings.getOrDefault(name, 5.0);
     }
 
     private static String sessionKey(String guildId, String userId, String channelId) {

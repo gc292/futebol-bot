@@ -12,6 +12,39 @@ import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FootballStoreTest {
+    @Test void removalPersistsWithoutLosingPastMatchesOrReseedingThePlayer() {
+        TeamDivision division=generated();
+        long matchId=record(division,3,1,DATE);
+        Player player=division.teamA().get(0);
+        store.removePlayer(GUILD,player.id());
+        store.removePlayer(GUILD,player.id()); // A retried request is harmless.
+        FootballStore reopened=new FootballStore(database); reopened.ensureGuild(GUILD);
+        assertFalse(reopened.players(GUILD).stream().anyMatch(p -> p.id()==player.id()));
+        assertFalse(reopened.ratedPlayers(GUILD).stream().anyMatch(p -> p.id()==player.id()));
+        assertEquals(player.name(),reopened.player(GUILD,player.id()).name());
+        assertEquals(matchId,reopened.matches(GUILD,null,0,10).get(0).id());
+        assertTrue(reopened.division(GUILD,division.id()).teamA().stream().anyMatch(p -> p.id()==player.id()));
+        assertThrows(FootballException.class,()->reopened.saveGeneratedDivision(GUILD,CHANNEL,USER,
+                division.teamA().stream().map(Player::name).toList(),division.teamB().stream().map(Player::name).toList(),"TEAMS"));
+        assertThrows(FootballException.class,()->reopened.removePlayer("another-guild",player.id()));
+    }
+    @Test void removedPlayersStopAppearingInRatingPolls() {
+        RatingPoll poll=store.addPlayerForVoting(GUILD,"Pending player");
+        store.removePlayer(GUILD,poll.playerId());
+        assertTrue(store.ratingPolls(GUILD).isEmpty());
+        assertThrows(FootballException.class,()->store.ratingPoll(GUILD,poll.id()));
+    }
+    @Test void readdingARemovedNameKeepsTheIdentityAndStartsANewVote() {
+        RatingPoll old=store.addPlayerForVoting(GUILD,"Returning player");
+        store.attachRatingForm(GUILD,old.id(),"https://docs.google.com/forms/d/e/old/viewform");
+        store.updateRatingVotes(GUILD,old.id(),List.of(80.0),true);
+        store.removePlayer(GUILD,old.playerId());
+        RatingPoll fresh=store.addPlayerForVoting(GUILD,"returning player");
+        assertEquals(old.playerId(),fresh.playerId()); assertNotEquals(old.id(),fresh.id());
+        assertEquals(0,fresh.voteCount()); assertEquals("CREATING",fresh.status());
+        assertTrue(store.players(GUILD).stream().anyMatch(p -> p.id()==old.playerId()));
+        assertFalse(store.ratedPlayers(GUILD).stream().anyMatch(p -> p.id()==old.playerId()));
+    }
     @TempDir Path directory;
     private Path database;
     private FootballStore store;

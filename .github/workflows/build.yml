@@ -10,6 +10,21 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: ci-test-password
+          MARIADB_DATABASE: football_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -pci-test-password"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      FOOTBALL_TEST_DB_URL: 'jdbc:mariadb://127.0.0.1:3306/football_test?sslMode=disable'
+      FOOTBALL_TEST_DB_USER: root
+      FOOTBALL_TEST_DB_PASSWORD: ci-test-password
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -27,3 +42,43 @@ jobs:
       - name: Remove test volume
         if: always()
         run: docker volume rm futebol-bot-ci-data || true
+
+  php:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: ci-test-password
+          MARIADB_DATABASE: football_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -pci-test-password"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PHP CLI and MariaDB driver
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y php-cli php-mysql
+      - name: Check PHP syntax and regressions
+        run: |
+          find sigma -name '*.php' -print0 | xargs -0 -n1 php -l
+          php sigma/tests/cookie_test.php
+          php sigma/tests/teams_test.php
+      - name: Build and exercise the Sigma deployment
+        run: |
+          python3 tools/build_sigma.py sigma-deploy
+          export FOOTBALL_CONFIG="$RUNNER_TEMP/football-config.php"
+          export FOOTBALL_PRIVATE_DIR="$PWD/sigma-deploy/football-private"
+          cat > "$FOOTBALL_CONFIG" <<'PHP'
+          <?php
+          return ['host'=>'127.0.0.1','port'=>3306,'database'=>'football_test','user'=>'root','password'=>'ci-test-password','guild_id'=>'ci-test','web_key'=>'ci-access-key-long-enough','admin_password'=>'ci-admin-password','secure_cookies'=>false];
+          PHP
+          php sigma-deploy/football-private/install.php
+          php -S 127.0.0.1:8082 -t sigma-deploy/web > "$RUNNER_TEMP/football-php.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:8082/futebol/ > /dev/null
+          python3 sigma/tests/http_smoke.py http://127.0.0.1:8082/futebol/ ci-access-key-long-enough ci-admin-password

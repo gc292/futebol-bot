@@ -1,0 +1,17 @@
+# Layer onto the existing compose.yaml. Both services mount the SAME SQLite volume.
+services:
+  web:
+    build: .
+    image: futebol-bot:latest
+    container_name: futebol-web
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      FOOTBALL_DB_PATH: /data/football.db
+      FOOTBALL_WEB_HOST: 0.0.0.0
+      FOOTBALL_WEB_PORT: 8080
+    entrypoint: ["java", "-cp", "/app/lib/*", "com.caria.futebol.WebMain"]
+    ports:
+      - "${FOOTBALL_WEB_BIND:-127.0.0.1}:8080:8080"
+    volumes:
+      - football-data:/data

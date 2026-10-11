@@ -30,19 +30,24 @@ final class BotMessages {
     }
 
     static String formatTeamsMessage(String title, Teams teams, List<String> substitutes, double bestDifference, boolean isRemake) {
+        return formatTeamsMessage(title, teams, substitutes, bestDifference, isRemake, PlayerCatalog::rankOf);
+    }
+
+    static String formatTeamsMessage(String title, Teams teams, List<String> substitutes, double bestDifference,
+                                     boolean isRemake, java.util.function.ToDoubleFunction<String> ratingOf) {
         StringBuilder sb = new StringBuilder();
         sb.append(title).append("\n\n");
 
         sb.append("**Team A (").append(String.format(Locale.US, "%.1f", teams.sumA)).append("):**\n");
         for (String n : teams.teamA) {
             sb.append("- ").append(n)
-                    .append(" (").append(String.format(Locale.US, "%.1f", rankOf(n))).append(")\n");
+                    .append(" (").append(String.format(Locale.US, "%.1f", ratingOf.applyAsDouble(n))).append(")\n");
         }
 
         sb.append("\n**Team B (").append(String.format(Locale.US, "%.1f", teams.sumB)).append("):**\n");
         for (String n : teams.teamB) {
             sb.append("- ").append(n)
-                    .append(" (").append(String.format(Locale.US, "%.1f", rankOf(n))).append(")\n");
+                    .append(" (").append(String.format(Locale.US, "%.1f", ratingOf.applyAsDouble(n))).append(")\n");
         }
 
         sb.append("\n**Difference (A vs B):** ")
@@ -52,7 +57,7 @@ final class BotMessages {
             sb.append("\n\n**Substitutes (").append(substitutes.size()).append("):**\n");
             for (String n : substitutes) {
                 sb.append("- ").append(n)
-                        .append(" (").append(String.format(Locale.US, "%.1f", rankOf(n))).append(")\n");
+                        .append(" (").append(String.format(Locale.US, "%.1f", ratingOf.applyAsDouble(n))).append(")\n");
             }
 
             if (!isRemake && bestDifference >= 0) {
