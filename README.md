@@ -1,7 +1,6 @@
 # Futebol Bot
 
-Discord bot for attendance checks and fixed 5v5 football teams. Copied from
-[LETI-111204/futebol-bot](https://github.com/LETI-111204/futebol-bot), preserving its Git history and behavior.
+Discord bot for attendance checks and balanced, fixed 5v5 football teams.
 
 ## Commands
 
