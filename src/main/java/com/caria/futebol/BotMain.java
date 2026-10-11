@@ -5,9 +5,9 @@ import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +23,9 @@ import static com.caria.futebol.TeamGenerator.splitIntoBalanced5v5;
 import static com.caria.futebol.TeamGenerator.splitRandom5v5;
 
 public class BotMain extends ListenerAdapter {
+    private final FootballStore store;
+
+    BotMain(FootballStore store) { this.store = store; }
 
     /**
      * Active attendance sessions:
@@ -48,9 +51,12 @@ public class BotMain extends ListenerAdapter {
             throw new IllegalStateException("Missing environment variable: DISCORD_TOKEN");
         }
 
-        // Build JDA and attach this listener
+        String databasePath = System.getenv().getOrDefault("FOOTBALL_DB_PATH", "data/football.db");
+        FootballStore store = new FootballStore(Path.of(databasePath));
+
+        // Build JDA and attach the existing and statistics listeners.
         JDA jda = JDABuilder.createDefault(token)
-                .addEventListeners(new BotMain())
+                .addEventListeners(new BotMain(store), new StatisticsListener(store))
                 .build();
 
         // Wait until Discord connection is ready
@@ -58,22 +64,28 @@ public class BotMain extends ListenerAdapter {
 
         // Register slash commands (GLOBAL). It can take a few minutes to appear.
         // If you already had old commands, they should update after propagation.
-        jda.updateCommands().addCommands(
-                Commands.slash("futebol", "Start attendance check (fixed panel with buttons)"),
-                Commands.slash("teams", "Generate fair 5v5 teams using decimal ranks (0.0–10.0)"),
-                Commands.slash("remake", "Remake teams (random, may be less fair)")
-        ).queue();
-
+        jda.updateCommands().addCommands(FootballCommands.all()).complete();
         System.out.println("✅ Bot is online and commands were submitted!");
     }
 
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
-        switch (event.getName()) {
-            case "futebol" -> startAttendance(event);
-            case "teams"   -> generateFairTeams(event);
-            case "remake"  -> generateRandomTeams(event);
-            default -> { /* ignore */ }
+        if (!List.of("futebol", "teams", "remake").contains(event.getName())) return;
+        if (event.getGuild() == null) {
+            event.reply("Use this command in a Discord server.").setEphemeral(true).queue();
+            return;
+        }
+        try {
+            store.ensureGuild(event.getGuild().getId());
+            switch (event.getName()) {
+                case "futebol" -> startAttendance(event);
+                case "teams"   -> generateFairTeams(event);
+                case "remake"  -> generateRandomTeams(event);
+                default -> { /* ignore */ }
+            }
+        } catch (RuntimeException error) {
+            error.printStackTrace(System.err);
+            event.reply("Could not save the team division. Please try again.").setEphemeral(true).queue();
         }
     }
 
@@ -82,7 +94,7 @@ public class BotMain extends ListenerAdapter {
      * Each click edits that same message to the next player.
      */
     private void startAttendance(SlashCommandInteractionEvent event) {
-        String key = sessionKey(event.getUser().getId(), event.getChannel().getId());
+        String key = sessionKey(event.getGuild().getId(), event.getUser().getId(), event.getChannel().getId());
 
         if (SESSIONS.containsKey(key)) {
             event.reply("There is already an attendance check running in this channel for you.")
@@ -114,6 +126,8 @@ public class BotMain extends ListenerAdapter {
 
         Pick10Result pick = pickBest10ForBalance(confirmed);
         Teams teams = splitIntoBalanced5v5(pick.chosenPlayers);
+        TeamDivision division = store.saveGeneratedDivision(event.getGuild().getId(), event.getChannel().getId(),
+                event.getUser().getId(), teams.teamA, teams.teamB, "TEAMS");
 
         event.reply(formatTeamsMessage(
                 "🎲 **Fair Teams (Fixed 5v5)**",
@@ -121,7 +135,7 @@ public class BotMain extends ListenerAdapter {
                 pick.substitutes,
                 pick.bestDifference,
                 false
-        )).queue();
+        ) + "\n\nSaved division **#" + division.id() + "**. After the game, use **/result generated**.").queue();
     }
 
     /**
@@ -136,6 +150,8 @@ public class BotMain extends ListenerAdapter {
 
         Pick10Result pick = pickRandom10(confirmed);
         Teams teams = splitRandom5v5(pick.chosenPlayers);
+        TeamDivision division = store.saveGeneratedDivision(event.getGuild().getId(), event.getChannel().getId(),
+                event.getUser().getId(), teams.teamA, teams.teamB, "REMAKE");
 
         event.reply(formatTeamsMessage(
                 "🔁 **Remake Teams (Random 5v5)**",
@@ -143,12 +159,12 @@ public class BotMain extends ListenerAdapter {
                 pick.substitutes,
                 -1.0,
                 true
-        )).queue();
+        ) + "\n\nSaved division **#" + division.id() + "**. After the game, use **/result generated**.").queue();
     }
 
     /** Replies with the original warning when team generation is unavailable. */
     private List<String> confirmedForTeams(SlashCommandInteractionEvent event) {
-        String channelId = event.getChannel().getId();
+        String channelId = event.getGuild().getId() + ":" + event.getChannel().getId();
         List<String> confirmed = LAST_CONFIRMED_BY_CHANNEL.get(channelId);
 
         if (confirmed == null || confirmed.isEmpty()) {
@@ -170,8 +186,12 @@ public class BotMain extends ListenerAdapter {
     public void onButtonInteraction(ButtonInteractionEvent event) {
         String id = event.getComponentId();
         if (!id.equals(BTN_YES) && !id.equals(BTN_NO)) return;
+        if (event.getGuild() == null) {
+            event.reply("Use this panel in a Discord server.").setEphemeral(true).queue();
+            return;
+        }
 
-        String key = sessionKey(event.getUser().getId(), event.getChannel().getId());
+        String key = sessionKey(event.getGuild().getId(), event.getUser().getId(), event.getChannel().getId());
         Session session = SESSIONS.get(key);
 
         if (session == null) {
@@ -207,7 +227,7 @@ public class BotMain extends ListenerAdapter {
         if (session.isFinished()) {
             // Store confirmed list for /teams and /remake
             SESSIONS.remove(key);
-            LAST_CONFIRMED_BY_CHANNEL.put(session.channelId, new ArrayList<>(session.confirmed));
+            LAST_CONFIRMED_BY_CHANNEL.put(event.getGuild().getId() + ":" + session.channelId, new ArrayList<>(session.confirmed));
 
             // Edit same message to summary and remove buttons
             event.editMessage(attendanceSummary(session))
@@ -224,7 +244,7 @@ public class BotMain extends ListenerAdapter {
         }
     }
 
-    private static String sessionKey(String userId, String channelId) {
-        return userId + ":" + channelId;
+    private static String sessionKey(String guildId, String userId, String channelId) {
+        return guildId + ":" + userId + ":" + channelId;
     }
 }

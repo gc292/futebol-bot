@@ -1,0 +1,87 @@
+CREATE TABLE IF NOT EXISTS guild_settings (
+    guild_id TEXT PRIMARY KEY,
+    manual_team_size INTEGER NOT NULL DEFAULT 5 CHECK(manual_team_size BETWEEN 1 AND 12),
+    minimum_win_rate_games INTEGER NOT NULL DEFAULT 5 CHECK(minimum_win_rate_games >= 1)
+);
+CREATE TABLE IF NOT EXISTS authorized_roles (
+    guild_id TEXT NOT NULL REFERENCES guild_settings(guild_id),
+    role_id TEXT NOT NULL,
+    PRIMARY KEY(guild_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS players (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL REFERENCES guild_settings(guild_id),
+    name TEXT NOT NULL,
+    discord_id TEXT,
+    rating REAL NOT NULL,
+    roster_order INTEGER NOT NULL,
+    UNIQUE(guild_id, name), UNIQUE(guild_id, discord_id), UNIQUE(guild_id, id)
+);
+CREATE TABLE IF NOT EXISTS divisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL REFERENCES guild_settings(guild_id),
+    channel_id TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    source TEXT NOT NULL CHECK(source IN ('BOT','MANUAL')),
+    mode TEXT NOT NULL CHECK(mode IN ('TEAMS','REMAKE','MANUAL')),
+    team_size INTEGER NOT NULL CHECK(team_size BETWEEN 1 AND 12),
+    UNIQUE(guild_id, id)
+);
+CREATE TABLE IF NOT EXISTS division_players (
+    guild_id TEXT NOT NULL,
+    division_id INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
+    team TEXT NOT NULL CHECK(team IN ('A','B')),
+    position INTEGER NOT NULL,
+    PRIMARY KEY(division_id, player_id),
+    UNIQUE(division_id, team, position),
+    FOREIGN KEY(guild_id, division_id) REFERENCES divisions(guild_id, id),
+    FOREIGN KEY(guild_id, player_id) REFERENCES players(guild_id, id)
+);
+CREATE TABLE IF NOT EXISTS matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    division_id INTEGER NOT NULL UNIQUE,
+    goals_a INTEGER NOT NULL CHECK(goals_a >= 0),
+    goals_b INTEGER NOT NULL CHECK(goals_b >= 0),
+    played_at TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    recorded_by TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(guild_id, id),
+    FOREIGN KEY(guild_id, division_id) REFERENCES divisions(guild_id, id)
+);
+CREATE INDEX IF NOT EXISTS matches_chronology ON matches(guild_id, played_at, id);
+CREATE INDEX IF NOT EXISTS division_player_history ON division_players(guild_id, player_id, division_id);
+CREATE TABLE IF NOT EXISTS drafts (
+    id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL REFERENCES guild_settings(guild_id),
+    user_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK(action IN ('CREATE','EDIT','DELETE')),
+    status TEXT NOT NULL CHECK(status IN ('ACTIVE','READY','CONFIRMED','CANCELLED')),
+    division_id INTEGER,
+    target_match_id INTEGER,
+    target_version INTEGER,
+    team_size INTEGER NOT NULL,
+    goals_a INTEGER,
+    goals_b INTEGER,
+    played_at TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 0,
+    confirmed_match_id INTEGER,
+    UNIQUE(guild_id, id),
+    FOREIGN KEY(guild_id, division_id) REFERENCES divisions(guild_id, id)
+);
+CREATE TABLE IF NOT EXISTS draft_players (
+    guild_id TEXT NOT NULL,
+    draft_id TEXT NOT NULL,
+    player_id INTEGER NOT NULL,
+    team TEXT NOT NULL CHECK(team IN ('A','B')),
+    position INTEGER NOT NULL,
+    PRIMARY KEY(draft_id, player_id),
+    UNIQUE(draft_id, team, position),
+    FOREIGN KEY(guild_id, draft_id) REFERENCES drafts(guild_id, id),
+    FOREIGN KEY(guild_id, player_id) REFERENCES players(guild_id, id)
+);
+PRAGMA user_version = 1;

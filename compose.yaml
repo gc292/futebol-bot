@@ -1,0 +1,15 @@
+services:
+  bot:
+    build: .
+    image: futebol-bot:latest
+    container_name: futebol-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      FOOTBALL_DB_PATH: /data/football.db
+    volumes:
+      - football-data:/data
+
+volumes:
+  football-data:
+    name: futebol-bot-data

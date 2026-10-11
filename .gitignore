@@ -1,6 +1,10 @@
 .gradle
 .env
 .env.*
+data/
+*.db
+*.db-wal
+*.db-shm
 build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/

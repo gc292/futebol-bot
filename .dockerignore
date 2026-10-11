@@ -5,3 +5,7 @@ build
 .env
 .env.*
 *.log
+data
+*.db
+*.db-wal
+*.db-shm

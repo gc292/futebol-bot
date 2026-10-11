@@ -18,3 +18,12 @@ jobs:
           java-version: '17'
       - name: Test and build distribution
         run: ./gradlew test installDist --no-daemon
+      - name: Build runtime image
+        run: docker build -t futebol-bot:ci .
+      - name: Verify persistence across container recreation
+        run: |
+          docker run --rm -v futebol-bot-ci-data:/data -v "$GITHUB_WORKSPACE/build/classes/java/test:/test-classes:ro" --entrypoint java futebol-bot:ci -cp '/test-classes:/app/lib/*' com.caria.futebol.ContainerPersistenceProbe write
+          docker run --rm -v futebol-bot-ci-data:/data -v "$GITHUB_WORKSPACE/build/classes/java/test:/test-classes:ro" --entrypoint java futebol-bot:ci -cp '/test-classes:/app/lib/*' com.caria.futebol.ContainerPersistenceProbe read
+      - name: Remove test volume
+        if: always()
+        run: docker volume rm futebol-bot-ci-data || true
