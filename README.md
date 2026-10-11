@@ -4,7 +4,7 @@ Discord bot for attendance checks and balanced, fixed 5v5 football teams.
 
 ## Commands
 
-- `/futebol`: asks about each player in the original order, using one message with Yes/No buttons. Each user can have one active session per channel.
+- `/futebol`: asks about each player in the configured roster order, using one message with Yes/No buttons. Each user can have one active session per channel.
 - `/teams`: uses the last completed attendance list in that channel to generate balanced 5v5 teams. With more than ten confirmed players, it samples up to 4,000 selections and lists the remaining players as substitutes.
 - `/remake`: randomly selects ten confirmed players and randomly splits them into two teams of five.
 
@@ -19,7 +19,7 @@ export DISCORD_TOKEN='your-bot-token'
 ./gradlew run
 ```
 
-The bot registers global slash commands on startup; Discord may take a few minutes to show them. The existing command descriptions, messages, ratings, random sampling and greedy balancing algorithm are preserved.
+The bot registers global slash commands on startup; Discord may take a few minutes to show them. The command descriptions, message formats, random sampling and greedy balancing algorithm are preserved.
 
 ```bash
 ./gradlew test installDist
@@ -45,4 +45,4 @@ Export `DISCORD_TOKEN` in the shell before running the container. Tokens must ne
 - `Teams` / `Pick10Result`: generation results.
 - `BotMessages`: attendance and team message formatting.
 
-Regression tests cover all 1,001 possible ten-player selections from the original fourteen-player roster, team sizes and membership, substitutes, attendance progression and exact message formatting.
+Regression tests cover all 43,758 possible ten-player selections from the eighteen-player roster, team sizes and membership, substitutes, attendance progression and exact message formatting.

@@ -25,7 +25,7 @@ class TeamGeneratorTest {
             assertEquals(originalOrder, ten);
             checked++;
         }
-        assertEquals(1001, checked);
+        assertEquals(43758, checked);
     }
 
     @Test
@@ -40,7 +40,7 @@ class TeamGeneratorTest {
 
     @Test
     void extraPlayersBecomeSubstitutesInAttendanceOrder() {
-        for (int count = 11; count <= 14; count++) {
+        for (int count = 11; count <= PlayerCatalog.PLAYERS.size(); count++) {
             List<String> confirmed = PlayerCatalog.PLAYERS.subList(0, count);
             Pick10Result pick = TeamGenerator.pickBest10ForBalance(confirmed);
             assertEquals(10, pick.chosenPlayers.size());

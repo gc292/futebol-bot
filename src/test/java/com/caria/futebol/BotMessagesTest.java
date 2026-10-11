@@ -42,7 +42,7 @@ class BotMessagesTest {
             assertEquals(base, BotMessages.formatTeamsMessage("Title", teams, List.of(), 20, false));
             assertEquals(base + "\n_(Remake mode: random split — may be less fair.)_",
                     BotMessages.formatTeamsMessage("Title", teams, List.of(), -1, true));
-            String substitutes = "\n\n**Substitutes (1):**\n- Gui (66.9)\n";
+            String substitutes = "\n\n**Substitutes (1):**\n- Gui (67.9)\n";
             assertEquals(base + substitutes
                     + "\n_(From more than 10 confirmed, I picked the 10 that produced the best balance. Best diff found: 20.00)_",
                     BotMessages.formatTeamsMessage("Title", teams, List.of("Gui"), 20, false));
