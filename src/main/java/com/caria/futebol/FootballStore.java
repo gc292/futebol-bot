@@ -571,6 +571,17 @@ final class FootballStore {
         return false;
     }
 
+    /** Delete only the reviewed version; statistics are derived from remaining matches. */
+    void deleteMatch(String guildId,long id,int expectedVersion) {
+        transaction(c -> {
+            Match match=match(c,guildId,id);
+            if (match.version()!=expectedVersion) throw new FootballException("This game changed. Refresh and review it before deleting.");
+            execute(c,"DELETE FROM matches WHERE guild_id=? AND id=? AND version=?",guildId,id,expectedVersion);
+            execute(c,"UPDATE drafts SET status='CANCELLED',revision=revision+1 WHERE guild_id=? AND confirmed_match_id=? AND action='CREATE' AND status='CONFIRMED'",guildId,id);
+            return null;
+        });
+    }
+
     Match match(String guildId, long id) { return transaction(c -> match(c, guildId, id)); }
     private static Match match(Connection c, String guildId, long id) throws SQLException {
         record Row(long divisionId, int a, int b, Instant played, Instant recorded, String user, int version) {}

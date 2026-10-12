@@ -10,9 +10,9 @@ function config(): array {
  $path=getenv('FOOTBALL_CONFIG') ?: __DIR__.'/config.php';
  if (!is_file($path)) throw new RuntimeException('Create the private config.php first.');
  $config=require $path;
- foreach (['host','database','user','password','guild_id','web_key','admin_password'] as $key)
+ foreach (['host','database','user','password','guild_id','admin_password'] as $key)
   if (!isset($config[$key]) || !is_string($config[$key]) || $config[$key]==='' || str_contains($config[$key],'REPLACE')) throw new RuntimeException('Invalid private configuration: '.$key);
- if (strlen($config['web_key'])<16 || strlen($config['admin_password'])<8) throw new RuntimeException('Use a web key of at least 16 characters and admin password of at least 8.');
+ if (strlen($config['admin_password'])<8) throw new RuntimeException('Use a management password of at least 8 characters.');
  return $config;
 }
 function db(): PDO {
@@ -77,18 +77,8 @@ function serve(): void {
    $origin=$_SERVER['HTTP_ORIGIN']??null;
    if($origin!==null) { $expected=(($c['secure_cookies']??true)?'https':'http').'://'.($_SERVER['HTTP_HOST']??'');if(!hash_equals($expected,$origin))fail('Invalid request origin.',403); }
   }
-  if($route==='/api/login'&&$post){
-   checkPassword('login',(string)($body['key']??''),$c['web_key']);$token=bin2hex(random_bytes(32));
-   sql('DELETE FROM web_sessions WHERE expires_at<=?',[time()]);
-   sql('INSERT INTO web_sessions VALUES(?,?,?)',[hash('sha256',$token),gid(),time()+86400]);cookie('football_session',$token,time()+86400);$result=['ok'=>true];
-  } else {
-   if($route!=='/api/voting'){
-    $token=$_COOKIE['football_session']??'';
-    if(!row('SELECT token_hash FROM web_sessions WHERE token_hash=? AND guild_id=? AND expires_at>?',[hash('sha256',$token),gid(),time()]))fail('Enter the website access key.',401);
-   }
-   if($post&&in_array($route,['/api/players','/api/players/vote','/api/players/remove','/api/rating-polls/close'],true)) checkPassword('admin',(string)($body['password']??''),$c['admin_password']);
-   $result=transaction(fn()=>dispatch($route,$method,$body));
-  }
+  if($post&&in_array($route,['/api/players','/api/players/vote','/api/players/remove','/api/rating-polls/close','/api/results/review','/api/results/confirm','/api/results/delete'],true)) checkPassword('admin',(string)($body['password']??''),$c['admin_password']);
+  $result=transaction(fn()=>dispatch($route,$method,$body));
   echo json_encode($result,JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
  } catch(ApiError $e){http_response_code($e->status);echo json_encode(['error'=>$e->getMessage()]);}
  catch(Throwable $e){error_log('Football: '.$e->getMessage());http_response_code(500);echo json_encode(['error'=>'The server could not complete this request. Check the private server error log.']);}

@@ -44,7 +44,7 @@ nano ~/football-private/config.php
 fs listacl ~/football-private
 ```
 
-Fill in the database password, your **existing Discord server ID** as `guild_id`, a website access key of at least 16 characters, and a player management password of at least 8 characters. Leave `secure_cookies` true for HTTPS. The access key opens the roster; the management password is required to add/remove players and finish voting. Voting links work without either password.
+Fill in the database password, your **existing Discord server ID** as `guild_id`, a management password of at least 8 characters. Leave `secure_cookies` true for HTTPS. The website opens without sign-in. The management password is required to add/remove players, finish voting, log games and delete games.
 
 The private directory must be readable by your CGI identity. If necessary, grant your own daemon principal access:
 
@@ -84,7 +84,7 @@ This seeds the initial catalogue once. After a successful import and checking th
 
 ## 4. Open the website
 
-Open `https://web.tecnico.ulisboa.pt/ist123456/futebol/` using the exact personal-page address shown by Técnico. Enter your website access key. Test adding a player with a fixed score and with voting, opening the voting link in another browser, finishing a vote, making teams and logging a game.
+Open `https://web.tecnico.ulisboa.pt/ist123456/futebol/` using the exact personal-page address shown by Técnico. Test adding a player with a fixed score and with voting, opening the voting link in another browser, finishing a vote, making teams and logging a game.
 
 The website works in a subdirectory without URL rewriting. PHP API requests go to `api.php?route=/api/...`. Sessions are stored in MariaDB, so they persist across CGI requests and deployments. Voting remains one editable vote per browser, not a verified-person system.
 
@@ -111,12 +111,6 @@ A 500 response contains no database credentials; detailed errors go to the hosti
 
 
 
-### Sign-in repeats after entering the correct access key
+### Updating an existing deployment
 
-Use HTTPS and allow cookies. The cookie path is detected from the public API request URL, including the IST ID, rather than the CGI interpreter path. Upload the current `bootstrap.php` and rebuild/upload `app.js` if using an older deployment. You can explicitly set the following in private `config.php` (replace the ID with your own):
-
-```php
-'cookie_path' => '/ist123456/futebol/',
-```
-
-Keep `secure_cookies` true on the HTTPS website. Clear this site's cookies after changing cookie paths, then reload with Ctrl+F5 and sign in again. The client now checks that the new session works before closing the sign-in dialog.
+Rebuild with `py tools/build_sigma.py sigma-deploy`, then upload `sigma-deploy/football-private` to your home directory and `sigma-deploy/web/futebol` to `~/web/` as above. Your private `config.php` is not overwritten. Reload the website with Ctrl+F5. There is no database migration for public browsing or game deletion. An old `web_key` entry may be removed from config.php; it is ignored. Keep `admin_password`, which now protects game logging and deletion as well as player management.

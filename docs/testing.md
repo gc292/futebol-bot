@@ -20,7 +20,7 @@ python3 tools/build_sigma.py sigma-deploy
 
 On Windows, use `py` instead of `python3` if needed. The cookie test covers CGI paths and personal-page aliases. The team test compares balanced teams against an independent exhaustive oracle.
 
-`http_smoke.py` exercises login, player management, anonymous editable voting, cleanup, teams, results, statistics and archive/restore. It creates test players and games: run it only against a fresh, isolated test database and deployment. The GitHub Actions PHP job provisions these automatically.
+`http_smoke.py` exercises public browsing, protected game logging/deletion, player management, anonymous editable voting, cleanup, teams, results, statistics and archive/restore. It creates test players and games: run it only against a fresh, isolated test database and deployment. The GitHub Actions PHP job provisions these automatically.
 
 The GitHub workflow also tests Java/MariaDB synchronization, builds the runtime image and verifies SQLite persistence across container recreation. No Discord token or university account is needed for CI.
 

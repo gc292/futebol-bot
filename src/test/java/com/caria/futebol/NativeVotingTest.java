@@ -37,7 +37,7 @@ class NativeVotingTest {
     }
     JsonObject json(HttpResponse<String> response) { return JsonParser.parseString(response.body()).getAsJsonObject(); }
     HttpClient admin() throws Exception {
-        var client=client(); assertEquals(200,request(client,"/api/login",Map.of("key",KEY)).statusCode()); return client;
+        return client();
     }
     String add(HttpClient admin) throws Exception {
         var response=request(admin,"/api/players/vote",Map.of("name","New friend","password",PASSWORD));
@@ -47,7 +47,7 @@ class NativeVotingTest {
         var admin=admin(); String id=add(admin); var a=client(); var b=client();
         assertEquals(200,request(a,"/vote?id="+id,null).statusCode());
         assertEquals(200,request(a,"/api/voting?id="+id,null).statusCode());
-        assertEquals(401,request(a,"/api/players",null).statusCode());
+        assertEquals(200,request(a,"/api/players",null).statusCode());
         assertEquals(400,request(client(),"/api/voting?id="+id,Map.of("score",99,"voter_id","spoofed")).statusCode());
         request(b,"/api/voting?id="+id,null);
         assertEquals(200,request(a,"/api/voting?id="+id,Map.of("score",60)).statusCode());

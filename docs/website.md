@@ -4,7 +4,7 @@ The responsive frontend lives in `src/main/resources/web/` (plain HTML, CSS and 
 
 ## Home server with the existing Docker database
 
-1. Retain your existing `.env` and `DISCORD_TOKEN`. Add the variables from `.env.web.example`. Set `FOOTBALL_GUILD_ID` to your actual Discord **server ID**, not a channel/user ID. In Discord, enable Developer Mode, then copy the server ID. Set a private access key of at least 16 characters.
+1. Retain your existing `.env` and `DISCORD_TOKEN`. Add the variables from `.env.web.example`. Set `FOOTBALL_GUILD_ID` to your actual Discord **server ID**, not a channel/user ID. In Discord, enable Developer Mode, then copy the server ID.
 2. Start both services:
 
    ```sh
@@ -13,7 +13,7 @@ The responsive frontend lives in `src/main/resources/web/` (plain HTML, CSS and 
 
 3. Visit `http://localhost:8080` on the server. To use phones on the home network, set `FOOTBALL_WEB_BIND` to the server's LAN IP and visit `http://<server-lan-ip>:8080`.
 
-Both services use the existing `futebol-bot-data` volume and `/data/football.db`. Keep that volume; do not use `docker compose down -v`. SQLite WAL handles concurrent access on this host. Do not put the database on a network filesystem. For access beyond a trusted LAN, place the service behind an HTTPS reverse proxy with access controls; the bundled access key is a small private-club gate, not an Internet account system. Sessions expire after 24 hours and are reset when the web process restarts. The frontend never receives the bot token or database path.
+Both services use the existing `futebol-bot-data` volume and `/data/football.db`. Keep that volume; do not use `docker compose down -v`. SQLite WAL handles concurrent access on this host. Do not put the database on a network filesystem. Use HTTPS when hosting publicly. Browsing, team generation and voting are public; player management and game logging/deletion require the management password. The frontend never receives the bot token or database path.
 
 To run the website alone, add `--no-deps web` to the Compose command (if the bot is already running separately, ensure it mounts this same volume).
 
@@ -27,11 +27,11 @@ $env:FOOTBALL_GUILD_ID='your-server-id'
 ./gradlew.bat runWeb
 ```
 
-The default address is `http://127.0.0.1:8080`. No Discord bot token is needed for `runWeb`. Voting links work without additional credentials; see `voting.md`. The application reads environment variables, not `.env` files, when run directly. Set `FOOTBALL_WEB_HOST=0.0.0.0` and `FOOTBALL_WEB_KEY` to allow LAN access. `FOOTBALL_WEB_PORT` is optional. The normal `./gradlew run` still starts Discord.
+The default address is `http://127.0.0.1:8080`. No Discord bot token is needed for `runWeb`. Voting links work without additional credentials; see `voting.md`. The application reads environment variables, not `.env` files, when run directly. Set `FOOTBALL_WEB_HOST=0.0.0.0` to allow LAN access. `FOOTBALL_WEB_PORT` is optional. The normal `./gradlew run` still starts Discord.
 
-## Player management password
+## Management password
 
-Set `FOOTBALL_ADMIN_PASSWORD` to a private password of at least 8 characters before adding or removing players. This is separate from the optional whole-site access key. Without it, browsing, making teams, and logging games work, but adding/removing players is locked. Both add endpoints and the removal endpoint enforce it on the server; the browser prompts for it on each action and does not save it. Five incorrect attempts from one address block management requests for one minute.
+Set `FOOTBALL_ADMIN_PASSWORD` to a private password of at least 8 characters before managing players or games. The website opens without sign-in; old `FOOTBALL_WEB_KEY` settings are ignored. Adding/removing players, finishing voting, reviewing/saving game results and deleting games require the password on the server. Without it, browsing and making teams still work, while management actions are locked. Passwords are sent only for the action and are not saved in browser storage. Five incorrect attempts from one address block management requests for one minute.
 
 Windows PowerShell, before starting the website:
 
@@ -55,7 +55,7 @@ In Players, use Remove beside a player's stats, then enter the password and conf
 - Browse catalogue statistics and paginated match history. Discord match edits/deletions and links to player records are read from the shared database; visible pages refresh every 15 seconds and on returning to the tab. Link metadata is retained in the database but isn't displayed by this frontend.
 - Database roster and ratings now drive Discord attendance and team generation too. Startup seeds missing defaults and preserves existing ratings; `PlayerCatalog.java` is now the initial seed, not a mechanism for updating persisted ratings. Discord player-name options accept free text so newly added names can be used immediately.
 
-Log games directly in **Games → Log a game**: choose a saved lineup or assign players to Team A and Team B, enter the goals and local date/time, review, and confirm. Manual teams use the existing configured team size (five by default). Only confirmation updates statistics. Duplicate confirmation retries cannot create a second game. Discord is still used for correcting/deleting results and managing account links. There is no fabricated demo data or separate browser database. A fresh database is seeded with your existing 18 default players; existing match history stays intact.
+Log games directly in **Games → Log a game**: choose a saved lineup or assign players to Team A and Team B, enter the goals and local date/time, review, and confirm. Manual teams use the existing configured team size (five by default). Only confirmation updates statistics. Duplicate confirmation retries cannot create a second game. Use Delete beside a game in the history to remove it with the management password; statistics update automatically. Discord can still correct results and manage account links. There is no fabricated demo data or separate browser database. A fresh database is seeded with your existing 18 default players; existing match history stays intact.
 
 ## Verification
 
@@ -67,3 +67,5 @@ Log games directly in **Games → Log a game**: choose a saved lineup or assign 
 ## Técnico Sigma
 
 For the university hosting deployment, use [sigma.md](sigma.md). It provides a PHP API for the shared frontend and MariaDB storage, with SQLite migration and Java bot synchronization. The local Java/SQLite instructions above remain available for testing on Windows.
+
+In Games, use Delete on a result, review the game and enter the management password. Deletion immediately recalculates statistics and keeps the saved teams available. If a game changed since the page loaded, refresh and review it again before deletion.

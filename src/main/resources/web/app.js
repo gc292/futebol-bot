@@ -10,6 +10,7 @@ function footballUrl(path) {
 }
 const $ = id => document.getElementById(id);
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let historyMatches = [], deleteGameTarget = null, deletingGame = false;
 let players = [], selected = new Set(), view = 'matchday', division = null, generatedIds = '', busy = false, loading = false, historyPage = 0, minimumGames = 5, teamSize = 5, votingConfigured = false, adminConfigured = false, removeTarget = null, toastTimer;
 try { const ids = JSON.parse(localStorage.getItem('football-attendance') || '[]'); if (Array.isArray(ids)) selected = new Set(ids.map(String)); } catch {}
 function remember() { try { localStorage.setItem('football-attendance', JSON.stringify([...selected])); } catch {} }
@@ -18,7 +19,6 @@ function connection(message, error = false) { $('connection').textContent = mess
 async function api(path, body) {
   const response = await fetch(footballUrl(path), {method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers: body === undefined ? {} : {'Content-Type':'application/json'}, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(path.includes("rating-polls") || path.endsWith("/vote") ? 45000 : 20000)});
   const data = await response.json();
-  if (response.status === 401 && !$('login-dialog').open) $('login-dialog').showModal();
   if (!response.ok) { const error = new Error(data.error || 'The server could not complete the request.'); error.status = response.status; throw error; }
   return data;
 }
@@ -79,12 +79,14 @@ async function refreshHistory() {
   try {
     const data = await api(`/api/history?page=${requestedPage}`);
     if (requestedPage !== historyPage) return;
-    $('history-list').innerHTML = data.matches.length ? data.matches.map(m => `<article class="history-card"><div class="history-top"><span>MATCH #${m.id}</span><time datetime="${escapeHtml(m.playedAt)}">${escapeHtml(new Date(m.playedAt).toLocaleString(undefined,{dateStyle:'medium', timeStyle:'short'}))}</time></div><div class="history-score"><span>TEAM A</span><strong>${m.goalsA} – ${m.goalsB}</strong><span>TEAM B</span></div><div class="history-teams"><div>${m.teamA.map(escapeHtml).join(' · ')}</div><div>${m.teamB.map(escapeHtml).join(' · ')}</div></div></article>`).join('') : '<p class="empty">No games logged yet. Use Log a game to enter the teams and score.</p>';
+    if (!data.matches.length && historyPage > 0) { historyPage--; return await refreshHistory(); }
+    historyMatches = data.matches;
+    $('history-list').innerHTML = data.matches.length ? data.matches.map(m => `<article class="history-card"><div class="history-top"><span>MATCH #${m.id}</span><time datetime="${escapeHtml(m.playedAt)}">${escapeHtml(new Date(m.playedAt).toLocaleString(undefined,{dateStyle:'medium', timeStyle:'short'}))}</time><button type="button" class="text-button" data-delete-game="${m.id}" ${!adminConfigured ? 'disabled' : ''} aria-label="Delete game #${m.id}">Delete</button></div><div class="history-score"><span>TEAM A</span><strong>${m.goalsA} – ${m.goalsB}</strong><span>TEAM B</span></div><div class="history-teams"><div>${m.teamA.map(escapeHtml).join(' · ')}</div><div>${m.teamB.map(escapeHtml).join(' · ')}</div></div></article>`).join('') : '<p class="empty">No games logged yet. Use Log a game to enter the teams and score.</p>';
     $('history-page').textContent = `Page ${historyPage+1}`; $('previous').disabled = historyPage === 0; $('next').disabled = !data.hasMore;
   } catch(e) { connection('Could not load match history. Use Refresh to retry.', true); toast(e.message); }
 }
 async function refresh(manual = false) {
-  if (loading || $('login-dialog').open) return;
+  if (loading) return;
   loading = true; $('refresh').disabled = true;
   try {
     const data = await api('/api/players'); players = data.players; minimumGames = data.minimumGames; teamSize = data.teamSize; votingConfigured = data.votingConfigured; adminConfigured = data.adminConfigured;
@@ -175,18 +177,7 @@ $('remove-form').onsubmit = async e => {
   } catch(e) { $('remove-error').textContent = e.message; }
   finally { $('remove-password').value = ''; $('remove-submit').disabled = false; }
 };
-$('login-dialog').addEventListener('cancel', e => e.preventDefault());
-$('login-form').onsubmit = async e => {
-  e.preventDefault(); const button = e.submitter; button.disabled = true; $('login-error').textContent = '';
-  try {
-    await api('/api/login', {key:$('access-key').value});
-    try { await api('/api/players'); }
-    catch(e) { if (e.status === 401) throw new Error('The access key was accepted, but the sign-in cookie was not returned. Use HTTPS, allow cookies, and check the server cookie_path setting.'); throw e; }
-    $('access-key').value = ''; $('login-dialog').close(); await refresh();
-  }
-  catch(e) { $('login-error').textContent = e.message; }
-  finally { button.disabled = false; }
-};
+
 $('previous').onclick = () => { if (historyPage > 0) { historyPage--; refreshHistory(); } };
 $('next').onclick = () => { historyPage++; refreshHistory(); };
 $('copy').onclick = async () => {
@@ -223,6 +214,7 @@ async function openGame(divisionId = null) {
   $('game-date').value = localDateValue(); $('game-date').max = localDateValue();
   $('game-source').innerHTML = '<option value="manual">Choose the players manually</option>';
   renderManualTeams(); $('manual-teams').hidden = false; $('saved-teams').hidden = true;
+  if (!adminConfigured) { toast('Set the management password on the server to log games.'); return; }
   $('game-dialog').showModal();
   try {
     const data = await api('/api/divisions'); gameDivisions = data.divisions;
@@ -260,7 +252,7 @@ $('game-form').onsubmit = async e => {
   try {
     if (!resultDraft) {
       const source = $('game-source').value;
-      const payload = {goalsA:$('goals-a').value, goalsB:$('goals-b').value, playedAt:new Date($('game-date').value).toISOString()};
+      const payload = {password:$('game-password').value, goalsA:$('goals-a').value, goalsB:$('goals-b').value, playedAt:new Date($('game-date').value).toISOString()};
       if (source === 'manual') {
         payload.teamA = [...manualTeams].filter(([,t]) => t === 'A').map(([id]) => id);
         payload.teamB = [...manualTeams].filter(([,t]) => t === 'B').map(([id]) => id);
@@ -271,9 +263,9 @@ $('game-form').onsubmit = async e => {
       $('game-review').innerHTML = `<p class="review-score">${resultDraft.goalsA} – ${resultDraft.goalsB}</p><p class="muted">${escapeHtml(new Date(resultDraft.playedAt).toLocaleString())}</p>${['A','B'].map(team => `<p><strong>Team ${team}</strong><br>${resultDraft[`team${team}`].map(p => escapeHtml(p.name)).join(' · ')}</p>`).join('')}<p class="roster-note">Confirm to add this game to everyone's stats.</p>`;
       $('game-submit').textContent = 'Confirm and save';
     } else {
-      const saved = await api('/api/results/confirm',{draftId:resultDraft.draftId,revision:resultDraft.revision});
+      const saved = await api('/api/results/confirm',{draftId:resultDraft.draftId,revision:resultDraft.revision,password:$('game-password').value});
       if (division && $('game-source').value === division.id) $('log-generated').disabled = true;
-      $('game-dialog').close(); historyPage = 0; setView('history'); await refresh(); toast(`Game #${saved.id} saved.`);
+      $('game-password').value = ''; $('game-dialog').close(); historyPage = 0; setView('history'); await refresh(); toast(`Game #${saved.id} saved.`);
     }
   } catch(e) { $('game-error').textContent = e.message; }
   finally { savingGame = false; $('game-submit').disabled = false; $('game-back').disabled = false; }
@@ -321,4 +313,25 @@ $('finish-vote-form').onsubmit = async e => {
     $('finish-vote-dialog').close(); await refresh(); toast($('finish-vote-form').dataset.native === 'true' ? 'Final rating saved. Individual votes deleted.' : 'Saved average kept as the final rating.');
   } catch(e) { $('finish-vote-error').textContent = e.message; }
   finally { $('finish-vote-submit').disabled = false; }
+};
+
+$('history-list').addEventListener('click', e => {
+  const button=e.target.closest('[data-delete-game]'); if (!button || deletingGame) return;
+  deleteGameTarget=historyMatches.find(m=>m.id===button.dataset.deleteGame); if (!deleteGameTarget) return;
+  $('delete-game-form').reset(); $('delete-game-error').textContent='';
+  $('delete-game-summary').textContent=`Game #${deleteGameTarget.id} · ${deleteGameTarget.goalsA} – ${deleteGameTarget.goalsB} · ${new Date(deleteGameTarget.playedAt).toLocaleString()}`;
+  $('delete-game-dialog').showModal();
+});
+$('delete-game-cancel').onclick=()=>{if (!deletingGame) $('delete-game-dialog').close();};
+$('delete-game-dialog').addEventListener('close',()=>{$('delete-game-password').value='';});
+$('game-dialog').addEventListener('close',()=>{$('game-password').value='';});
+$('delete-game-dialog').addEventListener('cancel',e=>{if(deletingGame)e.preventDefault();});
+$('delete-game-form').onsubmit=async e=>{
+  e.preventDefault(); if(deletingGame || !deleteGameTarget)return;
+  deletingGame=true; $('delete-game-submit').disabled=true; $('delete-game-error').textContent='';
+  try {
+    await api('/api/results/delete',{id:deleteGameTarget.id,version:deleteGameTarget.version,password:$('delete-game-password').value});
+    $('delete-game-dialog').close(); await refresh(); toast('Game deleted. Stats updated.');
+  } catch(e){$('delete-game-error').textContent=e.message;}
+  finally{deletingGame=false;$('delete-game-submit').disabled=false;}
 };

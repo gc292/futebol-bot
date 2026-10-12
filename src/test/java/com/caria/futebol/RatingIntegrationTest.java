@@ -47,7 +47,7 @@ class RatingIntegrationTest {
         var builder=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+web.port()+path));
         if (value!=null) {
             var payload=new Gson().toJsonTree(value).getAsJsonObject();
-            if (path.equals("/api/players/vote")) payload.addProperty("password","test-player-password");
+            if (path.equals("/api/players/vote") || path.startsWith("/api/rating-polls/")) payload.addProperty("password","test-player-password");
             builder.header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(payload.toString()));
         }
         return client.send(builder.build(),HttpResponse.BodyHandlers.ofString());

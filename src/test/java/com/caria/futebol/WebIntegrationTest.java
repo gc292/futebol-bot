@@ -23,7 +23,7 @@ class WebIntegrationTest {
         var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + web.port() + path));
         if (json != null) {
             var payload=JsonParser.parseString(json).getAsJsonObject();
-            if (path.equals("/api/players")) payload.addProperty("password","test-player-password");
+            if (path.equals("/api/players") || path.startsWith("/api/results/")) payload.addProperty("password","test-player-password");
             builder.header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(payload.toString()));
         }
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
@@ -54,17 +54,14 @@ class WebIntegrationTest {
         assertEquals(400, request("/api/teams", "{\"playerIds\":[1,1]}").statusCode());
         assertEquals(400, request("/api/teams", "{\"playerIds\":[1.5]}").statusCode());
     }
-    @Test void servesAssetsAndRequiresAuthenticationWhenConfigured() throws Exception {
-        assertEquals(200, request("/", null).statusCode());
-        assertTrue(request("/app.js", null).body().contains("/api/teams"));
-        assertEquals(404, request("/schema.sql", null).statusCode());
-        web.stop(); web = new WebMain(store,"guild","127.0.0.1",0,"a-long-test-access-key"); web.start();
-        assertEquals(401, request("/api/players", null).statusCode());
-        assertEquals(401, request("/api/login", "{\"key\":\"wrong\"}").statusCode());
-        var login = request("/api/login", "{\"key\":\"a-long-test-access-key\"}"); assertEquals(200,login.statusCode());
-        var cookie = login.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
-        var authenticated = HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+web.port()+"/api/players")).header("Cookie",cookie).build();
-        assertEquals(200,client.send(authenticated,HttpResponse.BodyHandlers.ofString()).statusCode());
+    @Test void websiteIsPublicEvenWithAnOldAccessKeyConfigured() throws Exception {
+        assertEquals(200,request("/",null).statusCode());
+        assertFalse(request("/",null).body().contains("login-dialog"));
+        assertEquals(404,request("/schema.sql",null).statusCode());
+        web.stop();web=new WebMain(store,"guild","127.0.0.1",0,"old-site-key",null,"test-player-password");web.start();
+        assertEquals(200,request("/api/players",null).statusCode());
+        assertEquals(200,request("/api/history",null).statusCode());
+        assertEquals(404,request("/api/login","{} ").statusCode());
     }
     @Test void moreThanTenRetainsTheSubstituteList() throws Exception {
         var selected = store.players("guild").stream().map(Player::id).toList();

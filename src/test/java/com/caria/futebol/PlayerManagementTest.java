@@ -61,7 +61,7 @@ class PlayerManagementTest {
         var roster=store.players("guild"); long id=roster.get(0).id();
         assertEquals(200,post("/api/players/remove",Map.of("id",id,"password",PASSWORD)).statusCode());
         assertEquals(400,post("/api/teams",Map.of("playerIds",roster.subList(0,10).stream().map(Player::id).toList())).statusCode());
-        assertEquals(400,post("/api/results/review",Map.of("teamA",roster.subList(0,5).stream().map(Player::id).toList(),
+        assertEquals(400,post("/api/results/review",Map.of("password",PASSWORD,"teamA",roster.subList(0,5).stream().map(Player::id).toList(),
                 "teamB",roster.subList(5,10).stream().map(Player::id).toList(),"goalsA",1,"goalsB",0,
                 "playedAt",java.time.Instant.now().minusSeconds(60).toString())).statusCode());
         assertTrue(store.matches("guild",null,0,10).isEmpty());

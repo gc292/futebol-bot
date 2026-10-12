@@ -99,7 +99,14 @@ function dispatch(string $route,string $method,array $b): array {
  case 'GET /api/divisions':$out=[];foreach(rows("SELECT d.id FROM divisions d LEFT JOIN matches m ON m.division_id=d.id WHERE d.guild_id=? AND d.source='BOT' AND m.id IS NULL ORDER BY d.id DESC LIMIT 100",[gid()]) as $r)$out[]=division((string)$r['id']);return ['divisions'=>$out];
  case 'POST /api/results/review':return review($b);
  case 'POST /api/results/confirm':return confirm($b);
- case 'GET /api/history':$page=filter_var($_GET['page']??0,FILTER_VALIDATE_INT);if($page===false||$page<0||$page>100000)fail('Invalid page.');$offset=$page*12;$matches=rows("SELECT * FROM matches WHERE guild_id=? ORDER BY played_at DESC,id DESC LIMIT 13 OFFSET $offset",[gid()]);$more=count($matches)>12;$out=[];foreach(array_slice($matches,0,12) as $r){$d=division((string)$r['division_id']);$out[]=['id'=>(string)$r['id'],'playedAt'=>$r['played_at'],'goalsA'=>(int)$r['goals_a'],'goalsB'=>(int)$r['goals_b'],'teamA'=>array_column($d['teamA'],'name'),'teamB'=>array_column($d['teamB'],'name')];}return ['matches'=>$out,'hasMore'=>$more];
+ case 'POST /api/results/delete':
+  $id=identifier($b['id']??null);$version=goals($b['version']??null);
+  $m=row('SELECT version FROM matches WHERE guild_id=? AND id=?',[gid(),$id]);if(!$m)fail('Game not found. Refresh the history.',404);
+  if($version!==(int)$m['version'])fail('This game changed. Refresh and review it before deleting.',409);
+  sql('DELETE FROM matches WHERE guild_id=? AND id=? AND version=?',[gid(),$id,$version]);
+  sql("UPDATE drafts SET status='CANCELLED',revision=revision+1 WHERE guild_id=? AND confirmed_match_id=? AND action='CREATE' AND status='CONFIRMED'",[gid(),$id]);
+  return ['ok'=>true];
+ case 'GET /api/history':$page=filter_var($_GET['page']??0,FILTER_VALIDATE_INT);if($page===false||$page<0||$page>100000)fail('Invalid page.');$offset=$page*12;$matches=rows("SELECT * FROM matches WHERE guild_id=? ORDER BY played_at DESC,id DESC LIMIT 13 OFFSET $offset",[gid()]);$more=count($matches)>12;$out=[];foreach(array_slice($matches,0,12) as $r){$d=division((string)$r['division_id']);$out[]=['id'=>(string)$r['id'],'version'=>(int)$r['version'],'playedAt'=>$r['played_at'],'goalsA'=>(int)$r['goals_a'],'goalsB'=>(int)$r['goals_b'],'teamA'=>array_column($d['teamA'],'name'),'teamB'=>array_column($d['teamB'],'name')];}return ['matches'=>$out,'hasMore'=>$more];
  default:fail('Endpoint not found.',404);
  }
 }

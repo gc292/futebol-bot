@@ -16,16 +16,13 @@ public final class WebMain {
     private static final Gson JSON = new Gson();
     private final FootballStore store;
     private final String guild;
-    private final String accessKey;
     private final String adminPassword;
     private final Map<String, PasswordAttempts> passwordAttempts = new ConcurrentHashMap<>();
     private record PasswordAttempts(int count, Instant resetAt) {}
-    private final Map<String, Instant> sessions = new ConcurrentHashMap<>();
     private final HttpServer server;
     private final RatingService ratings;
     private final NativeVoting voting;
     private final boolean legacyForms;
-    private final boolean secureCookies;
 
     WebMain(FootballStore store, String guild, String host, int port, String accessKey) throws IOException {
         this(store,guild,host,port,accessKey,null);
@@ -38,15 +35,12 @@ public final class WebMain {
     }
     WebMain(FootballStore store, String guild, String host, int port, String accessKey, FormsGateway forms, String adminPassword, boolean secureCookies) throws IOException {
         if (guild == null || guild.isBlank()) throw new IllegalArgumentException("Set FOOTBALL_GUILD_ID to your Discord server ID.");
-        if (!Set.of("127.0.0.1", "localhost", "::1").contains(host) && (accessKey == null || accessKey.length() < 16))
-            throw new IllegalArgumentException("Set FOOTBALL_WEB_KEY (at least 16 characters) when listening on the network.");
-        this.store = store; this.guild = guild; this.accessKey = accessKey == null ? "" : accessKey;
+        this.store = store; this.guild = guild;
         this.adminPassword = adminPassword == null ? "" : adminPassword;
         if (!this.adminPassword.isEmpty() && this.adminPassword.length() < 8)
             throw new IllegalArgumentException("FOOTBALL_ADMIN_PASSWORD must contain at least 8 characters.");
         store.ensureGuild(guild);
         ratings = new RatingService(store,guild,forms);
-        this.secureCookies=secureCookies;
         voting = new NativeVoting(store,guild,secureCookies); legacyForms=forms!=null;
         server = HttpServer.create(new InetSocketAddress(host, port), 32);
         server.createContext("/", this::handle);
@@ -57,7 +51,7 @@ public final class WebMain {
         Map<String, String> env = System.getenv();
         WebMain web = new WebMain(FootballStore.fromEnvironment(env),
                 env.get("FOOTBALL_GUILD_ID"), env.getOrDefault("FOOTBALL_WEB_HOST", "127.0.0.1"),
-                Integer.parseInt(env.getOrDefault("FOOTBALL_WEB_PORT", "8080")), env.get("FOOTBALL_WEB_KEY"),
+                Integer.parseInt(env.getOrDefault("FOOTBALL_WEB_PORT", "8080")), null,
                 null, env.get("FOOTBALL_ADMIN_PASSWORD"), Boolean.parseBoolean(env.getOrDefault("FOOTBALL_WEB_SECURE_COOKIES","false")));
         web.start();
         System.out.println("Football website listening on " + web.server.getAddress());
@@ -67,23 +61,9 @@ public final class WebMain {
     int port() { return server.getAddress().getPort(); }
     void stop() { ratings.close(); server.stop(0); ((ExecutorService) server.getExecutor()).shutdownNow(); }
 
-    private boolean authorized(HttpExchange x) {
-        if (accessKey.isEmpty()) return true;
-        String cookies = x.getRequestHeaders().getFirst("Cookie");
-        if (cookies == null) return false;
-        for (String cookie : cookies.split(";")) {
-            String[] parts = cookie.trim().split("=", 2);
-            if (parts.length == 2 && parts[0].equals("football_session")) {
-                Instant expiry = sessions.get(parts[1]);
-                if (expiry != null && expiry.isAfter(Instant.now())) return true;
-            }
-        }
-        return false;
-    }
-
     private synchronized boolean requireAdmin(HttpExchange x, JsonObject body) throws IOException {
         if (adminPassword.isEmpty()) {
-            reply(x,403,Map.of("error","Set FOOTBALL_ADMIN_PASSWORD on the server before adding or removing players.")); return false;
+            reply(x,403,Map.of("error","Set FOOTBALL_ADMIN_PASSWORD on the server before managing players or games.")); return false;
         }
         Instant now = Instant.now();
         passwordAttempts.entrySet().removeIf(e -> !e.getValue().resetAt().isAfter(now));
@@ -98,7 +78,7 @@ public final class WebMain {
                 reply(x,429,Map.of("error","Too many password attempts. Try again in a minute.")); return false;
             }
             passwordAttempts.put(address,new PasswordAttempts(attempts == null ? 1 : attempts.count()+1,attempts == null ? now.plusSeconds(60) : attempts.resetAt()));
-            reply(x,403,Map.of("error","Incorrect player management password.")); return false;
+            reply(x,403,Map.of("error","Incorrect management password.")); return false;
         }
         passwordAttempts.remove(address); return true;
     }
@@ -115,20 +95,7 @@ public final class WebMain {
                 reply(x, 415, Map.of("error", "Use application/json.")); return;
             }
             if (voting.handle(x)) return;
-            if (path.equals("/api/login") && post) {
-                String key = body(x).get("key").getAsString();
-                if (!MessageDigest.isEqual(key.getBytes(StandardCharsets.UTF_8), accessKey.getBytes(StandardCharsets.UTF_8))) {
-                    reply(x, 401, Map.of("error", "That access key is incorrect.")); return;
-                }
-                sessions.entrySet().removeIf(e -> e.getValue().isBefore(Instant.now()));
-                if (sessions.size() >= 1000) { reply(x, 429, Map.of("error", "Too many sessions.")); return; }
-                String token = UUID.randomUUID().toString();
-                sessions.put(token, Instant.now().plusSeconds(86400));
-                x.getResponseHeaders().add("Set-Cookie", "football_session=" + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400"+(secureCookies ? "; Secure" : ""));
-                reply(x, 200, Map.of("ok", true)); return;
-            }
             if (path.startsWith("/api/")) {
-                if (!authorized(x)) { reply(x, 401, Map.of("error", "Enter your server access key to continue.")); return; }
                 if (path.equals("/api/players") && !post && x.getRequestMethod().equals("GET")) {
                     List<Map<String, Object>> rows = new ArrayList<>();
                     Map<Long,RatingPoll> polls = new HashMap<>();
@@ -155,16 +122,14 @@ public final class WebMain {
                     reply(x,200,Map.of("polls",store.ratingPolls(guild).stream().map(this::poll).toList())); return;
                 }
                 if (Set.of("/api/rating-polls/retry","/api/rating-polls/sync","/api/rating-polls/close","/api/rating-polls/cleanup").contains(path) && post) {
-                    JsonObject request=body(x); String id=request.get("id").getAsString();
+                    JsonObject request=body(x); if (!requireAdmin(x,request)) return; String id=request.get("id").getAsString();
                     if (store.nativePoll(id)) {
                         store.ratingPoll(guild,id);
                         if (!path.endsWith("/close")) throw new FootballException("Website votes update automatically.");
-                        if (!requireAdmin(x,request)) return;
                         store.closeNativePoll(guild,id); reply(x,200,poll(store.ratingPoll(guild,id))); return;
                     }
                     if (!legacyForms) {
                         if (!path.endsWith("/close")) throw new FootballException("Google polls no longer sync. New votes happen on the website.");
-                        if (!requireAdmin(x,request)) return;
                         store.finishSavedGooglePoll(guild,id); reply(x,200,poll(store.ratingPoll(guild,id))); return;
                     }
                     if (path.endsWith("/cleanup")) {
@@ -216,7 +181,7 @@ public final class WebMain {
                     reply(x, 200, Map.of("divisions", divisions)); return;
                 }
                 if (path.equals("/api/results/review") && post) {
-                    JsonObject b = body(x);
+                    JsonObject b = body(x); if (!requireAdmin(x,b)) return;
                     int goalsA = FootballStore.parseGoals(b.get("goalsA").getAsString());
                     int goalsB = FootballStore.parseGoals(b.get("goalsB").getAsString());
                     Instant playedAt = Instant.parse(b.get("playedAt").getAsString());
@@ -244,7 +209,7 @@ public final class WebMain {
                             "teamB", draft.teamB().stream().map(WebMain::player).toList())); return;
                 }
                 if (path.equals("/api/results/confirm") && post) {
-                    JsonObject b = body(x);
+                    JsonObject b = body(x); if (!requireAdmin(x,b)) return;
                     ResultDraft draft = store.draft(guild, "website", b.get("draftId").getAsString());
                     int revision = b.get("revision").getAsBigDecimal().intValueExact();
                     if (!draft.action().equals("CREATE")) throw new FootballException("This form cannot create a game.");
@@ -252,13 +217,18 @@ public final class WebMain {
                             : store.confirm(guild, "website", draft.id(), revision, false);
                     reply(x, 200, Map.of("id", Long.toString(matchId))); return;
                 }
+                if (path.equals("/api/results/delete") && post) {
+                    JsonObject b=body(x); if (!requireAdmin(x,b)) return;
+                    store.deleteMatch(guild,b.get("id").getAsBigDecimal().longValueExact(),b.get("version").getAsBigDecimal().intValueExact());
+                    reply(x,200,Map.of("ok",true)); return;
+                }
                 if (path.equals("/api/history") && x.getRequestMethod().equals("GET")) {
                     int page = 0;
                     String query = x.getRequestURI().getQuery();
                     if (query != null && query.startsWith("page=")) page = Integer.parseInt(query.substring(5));
                     if (page < 0 || page > 100000) throw new FootballException("Invalid page.");
                     List<Map<String, Object>> matches = new ArrayList<>();
-                    for (Match m : store.matches(guild, null, page, 12)) matches.add(Map.of("id", Long.toString(m.id()),
+                    for (Match m : store.matches(guild, null, page, 12)) matches.add(Map.of("id", Long.toString(m.id()), "version",m.version(),
                             "playedAt", m.playedAt().toString(), "goalsA", m.goalsA(), "goalsB", m.goalsB(),
                             "teamA", m.division().teamA().stream().map(Player::name).toList(),
                             "teamB", m.division().teamB().stream().map(Player::name).toList()));

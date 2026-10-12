@@ -4,13 +4,13 @@ Voting runs inside the website using the shared football database: PHP/MariaDB o
 
 ## Using it
 
-1. Add player â†’ Start voting â†’ enter the player management password.
+1. Add player → Start voting → enter the player management password.
 2. Copy the voting link and send it to your friends.
 3. They open the page, enter a score from 0 to 100, and press Save vote. Decimals are allowed. Saving again from the same browser updates their existing vote.
 4. The average and player score update immediately in the shared database. Open pages refresh every 15 seconds. Players become selectable after their first vote.
-5. Players â†’ Rating votes â†’ Finish voting â†’ enter the management password. The final average and count are saved and individual votes are deleted in the same transaction. Closing cannot be undone, and retries are safe.
+5. Players → Rating votes → Finish voting → enter the management password. The final average and count are saved and individual votes are deleted in the same transaction. Closing cannot be undone, and retries are safe.
 
-The voting link does not require the website access key or management password. Anyone with the link can vote, so share it with the intended group. Player creation, removal and closing votes retain password protection.
+The voting link does not require the management password. Anyone with the link can vote, so share it with the intended group. Player creation, removal and closing votes retain password protection.
 
 ## How repeat votes work
 
@@ -20,7 +20,7 @@ This limits each browser to one editable vote per player. It does **not** guaran
 
 ## Running locally or online
 
-No new credentials are required. Keep your existing database, guild ID, website key and management password settings. Stop the website with Ctrl+C and restart:
+No new credentials are required. Keep your existing database, guild ID and management password settings. Stop the website with Ctrl+C and restart:
 
 ```powershell
 .\gradlew.bat runWeb

@@ -74,11 +74,11 @@ jobs:
           export FOOTBALL_PRIVATE_DIR="$PWD/sigma-deploy/football-private"
           cat > "$FOOTBALL_CONFIG" <<'PHP'
           <?php
-          return ['host'=>'127.0.0.1','port'=>3306,'database'=>'football_test','user'=>'root','password'=>'ci-test-password','guild_id'=>'ci-test','web_key'=>'ci-access-key-long-enough','admin_password'=>'ci-admin-password','secure_cookies'=>false];
+          return ['host'=>'127.0.0.1','port'=>3306,'database'=>'football_test','user'=>'root','password'=>'ci-test-password','guild_id'=>'ci-test','admin_password'=>'ci-admin-password','secure_cookies'=>false];
           PHP
           php sigma-deploy/football-private/install.php
           php -S 127.0.0.1:8082 -t sigma-deploy/web > "$RUNNER_TEMP/football-php.log" 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid"' EXIT
           curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:8082/futebol/ > /dev/null
-          python3 sigma/tests/http_smoke.py http://127.0.0.1:8082/futebol/ ci-access-key-long-enough ci-admin-password
+          python3 sigma/tests/http_smoke.py http://127.0.0.1:8082/futebol/ ci-admin-password
