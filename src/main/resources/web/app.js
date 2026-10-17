@@ -10,7 +10,7 @@ function footballUrl(path) {
 }
 const $ = id => document.getElementById(id);
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let comparisonOptions = [], rankedBatch = [], nextRank = 1;
+let comparisonOptions = [];
 let historyMatches = [], deleteGameTarget = null, deletingGame = false;
 let players = [], selected = new Set(), view = 'matchday', division = null, generatedIds = '', busy = false, loading = false, historyPage = 0, minimumGames = 5, teamSize = 5, votingConfigured = false, adminConfigured = false, removeTarget = null, toastTimer;
 try { const ids = JSON.parse(localStorage.getItem('football-attendance') || '[]'); if (Array.isArray(ids)) selected = new Set(ids.map(String)); } catch {}
@@ -61,8 +61,6 @@ function renderTeams() {
   $('log-generated').disabled = false;
   $('results').hidden = false;
   renderDivisionLabel();
-  $('next-option').disabled = busy || nextRank >= rankedBatch.length;
-  $('next-option').textContent = nextRank < rankedBatch.length ? `Show option ${nextRank+1}` : 'All 3 options available';
   $('team-option-select').innerHTML = comparisonOptions.map(option => `<option value="${option.id}">${escapeHtml(option.label)} · average difference ${averageDifference(option).toFixed(1)}</option>`).join('');
   $('team-option-select').value = division.id;
   $('team-option-select').disabled = busy;
@@ -79,7 +77,7 @@ function useOption(option) {
 }
 async function generate(random = false) {
   if (busy || selected.size < 10) return;
-  busy = true; renderSelection(); $('remake').disabled = true; $('next-option').disabled = true;
+  busy = true; renderSelection(); $('remake').disabled = true;
   const signature = selectionSignature();
   try {
     const data = await api('/api/teams', {playerIds:[...selected], random, alternatives:!random});
@@ -90,8 +88,7 @@ async function generate(random = false) {
       option.signature = signature; option.rank = random ? null : i+1;
       option.label = random ? 'Random split' : `${round > 1 ? `Round ${round} · ` : ''}Option ${i+1}${data.exact === false ? ' · sampled' : ''}`;
     });
-    comparisonOptions.push(batch[0]);
-    if (!random) { rankedBatch = batch; nextRank = 1; }
+    comparisonOptions.push(...batch);
     division = batch[0]; generatedIds = signature;
     renderTeams(); $('results').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block:'start'});
   } catch(e) { toast(e.message); }
@@ -163,12 +160,6 @@ $('search').addEventListener('input', renderRoster); $('sort').addEventListener(
 $('catalogue-search').addEventListener('input', renderCatalogue); $('catalogue-sort').addEventListener('change', renderCatalogue);
 $('select-all').onclick = () => { if (!busy) { selected = new Set(players.filter(p => p.ratingReady !== false).map(p => p.id)); remember(); renderRoster(); } };
 $('clear').onclick = () => { if (!busy) { selected.clear(); remember(); renderRoster(); } };
-$('next-option').onclick = () => {
-  if (busy || nextRank >= rankedBatch.length) return;
-  const option = rankedBatch[nextRank++];
-  comparisonOptions.push(option);
-  useOption(option);
-};
 $('team-option-select').onchange = () => {
   if (busy) return;
   const option = comparisonOptions.find(o => o.id === $('team-option-select').value);
