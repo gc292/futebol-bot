@@ -165,6 +165,16 @@ public final class WebMain {
                     attendees.forEach(p -> ratings.put(p.name(), p.rating()));
                     List<String> names = attendees.stream().map(Player::name).toList();
                     boolean random = b.has("random") && b.get("random").getAsBoolean();
+                    if (!random && b.has("alternatives") && b.get("alternatives").getAsBoolean()) {
+                        List<Map<String,Object>> options=new ArrayList<>();
+                        for (Teams teams:TeamGenerator.rankedOptions(names,ratings::get)) {
+                            TeamDivision saved=store.saveGeneratedDivision(guild,"website","website",teams.teamA,teams.teamB,"TEAMS");
+                            List<String> subs=names.stream().filter(n -> !teams.teamA.contains(n) && !teams.teamB.contains(n)).toList();
+                            options.add(Map.of("id",Long.toString(saved.id()),"teamA",saved.teamA().stream().map(WebMain::player).toList(),
+                                "teamB",saved.teamB().stream().map(WebMain::player).toList(),"sumA",teams.sumA,"sumB",teams.sumB,"substitutes",subs,"random",false));
+                        }
+                        reply(x,201,Map.of("options",options,"exact",names.size()<=24)); return;
+                    }
                     Pick10Result pick = random ? TeamGenerator.pickRandom10(names) : TeamGenerator.pickBest10ForBalance(names, ratings::get);
                     Teams teams = random ? TeamGenerator.splitRandom5v5(pick.chosenPlayers, ratings::get)
                             : TeamGenerator.splitIntoBalanced5v5(pick.chosenPlayers, ratings::get);

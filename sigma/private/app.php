@@ -95,7 +95,10 @@ function dispatch(string $route,string $method,array $b): array {
  case 'POST /api/players/remove':$id=identifier($b['id']??null);if(!in_array($id,array_column(activePlayers(),'id'),true))fail('Player not found.',404);sql('INSERT INTO removed_players VALUES(?,?,?)',[gid(),$id,now()]);return ['ok'=>true];
  case 'GET /api/rating-polls':return ['polls'=>polls()];
  case 'POST /api/rating-polls/close':$id=(string)($b['id']??'');$poll=array_values(array_filter(polls(),fn($p)=>$p['id']===$id))[0]??null;if(!$poll)fail('Voting not found.',404);if($poll['count']<1)fail('Wait for at least one vote.');sql("UPDATE rating_polls SET status='CLOSED',updated_at=? WHERE id=?",[now(),$id]);sql('DELETE FROM rating_votes WHERE poll_id=?',[$id]);$poll['status']='CLOSED';return $poll;
- case 'POST /api/teams':$players=selectPlayers($b['playerIds']??null);[$a,$bb,$subs]=makeTeams($players,(bool)($b['random']??false));$id=saveDivision($a,$bb);return ['id'=>$id,'teamA'=>$a,'teamB'=>$bb,'sumA'=>array_sum(array_column($a,'rating')),'sumB'=>array_sum(array_column($bb,'rating')),'substitutes'=>array_column($subs,'name'),'random'=>(bool)($b['random']??false)];
+ case 'POST /api/teams':$players=selectPlayers($b['playerIds']??null);if(!($b['random']??false)&&($b['alternatives']??false)){
+  $options=[];foreach(rankedTeamOptions($players) as [$a,$bb,$subs]){$id=saveDivision($a,$bb);$options[]=['id'=>$id,'teamA'=>$a,'teamB'=>$bb,'sumA'=>array_sum(array_column($a,'rating')),'sumB'=>array_sum(array_column($bb,'rating')),'substitutes'=>array_column($subs,'name'),'random'=>false];}
+  http_response_code(201);return ['options'=>$options,'exact'=>count($players)<=24];
+ }[$a,$bb,$subs]=makeTeams($players,(bool)($b['random']??false));$id=saveDivision($a,$bb);return ['id'=>$id,'teamA'=>$a,'teamB'=>$bb,'sumA'=>array_sum(array_column($a,'rating')),'sumB'=>array_sum(array_column($bb,'rating')),'substitutes'=>array_column($subs,'name'),'random'=>(bool)($b['random']??false)];
  case 'GET /api/divisions':$out=[];foreach(rows("SELECT d.id FROM divisions d LEFT JOIN matches m ON m.division_id=d.id WHERE d.guild_id=? AND d.source='BOT' AND m.id IS NULL ORDER BY d.id DESC LIMIT 100",[gid()]) as $r)$out[]=division((string)$r['id']);return ['divisions'=>$out];
  case 'POST /api/results/review':return review($b);
  case 'POST /api/results/confirm':return confirm($b);

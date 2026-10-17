@@ -10,6 +10,7 @@ function footballUrl(path) {
 }
 const $ = id => document.getElementById(id);
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let comparisonOptions = [], rankedBatch = [], nextRank = 1;
 let historyMatches = [], deleteGameTarget = null, deletingGame = false;
 let players = [], selected = new Set(), view = 'matchday', division = null, generatedIds = '', busy = false, loading = false, historyPage = 0, minimumGames = 5, teamSize = 5, votingConfigured = false, adminConfigured = false, removeTarget = null, toastTimer;
 try { const ids = JSON.parse(localStorage.getItem('football-attendance') || '[]'); if (Array.isArray(ids)) selected = new Set(ids.map(String)); } catch {}
@@ -42,29 +43,54 @@ function renderSelection() {
   $('selected-chips').innerHTML = players.filter(p => selected.has(p.id)).map(p => `<button class="chip" data-remove="${p.id}" aria-label="Remove ${escapeHtml(p.name)} from attendance">${escapeHtml(p.name)} <span aria-hidden="true">×</span></button>`).join('');
   $('generate').disabled = count < 10 || busy || loading;
   $('generate').innerHTML = busy ? 'Making teams…' : 'Make the teams <span>↗</span>';
-  if (division) renderDivisionLabel();
+  if (division) {
+    renderDivisionLabel();
+    document.querySelectorAll('[data-use-option]').forEach(button => {
+      const option = comparisonOptions.find(o => o.id === button.dataset.useOption);
+      if (option) button.closest('.team-option').querySelector('.roster-note').textContent = option.signature !== selectionSignature() ? 'Attendance has changed since these teams were made.' : '';
+    });
+  }
 }
 function togglePlayer(id) { if (busy || players.find(p => p.id === id)?.ratingReady === false) return; selected.has(id) ? selected.delete(id) : selected.add(id); remember(); renderRoster(); }
 function selectionSignature() { return [...selected].sort().join(','); }
 function renderDivisionLabel() {
-  $('division-label').textContent = `Saved division #${division.id} · ${division.random ? 'Random split' : `Rating difference: ${Math.abs(division.sumA-division.sumB).toFixed(1)}`} ${generatedIds !== selectionSignature() ? '· Attendance has changed. Generate again for this selection.' : ''}`;
+  $('division-label').textContent = `Selected: ${division.label || "Teams"} · Saved division #${division.id} · ${division.random ? 'Random split' : `Rating difference: ${Math.abs(division.sumA-division.sumB).toFixed(1)}`} ${generatedIds !== selectionSignature() ? '· Attendance has changed. Generate again for this selection.' : ''}`;
 }
 function renderTeams() {
   $('log-generated').disabled = false;
   $('results').hidden = false;
   renderDivisionLabel();
-  $('team-cards').innerHTML = ['A','B'].map(team => `<article class="team-card"><div class="team-head"><h3>Team ${team}</h3><span>${division[`sum${team}`].toFixed(1)} total rating</span></div>${division[`team${team}`].map((p,i) => `<div class="team-player"><span class="number">0${i+1}</span><span>${escapeHtml(p.name)}</span><span class="rating">${p.rating.toFixed(1)}</span></div>`).join('')}</article>`).join('');
-  $('substitutes').innerHTML = division.substitutes.length ? `<strong>On the bench (${division.substitutes.length})</strong> &nbsp; ${division.substitutes.map(escapeHtml).join(' · ')}` : 'No substitutes.';
+  $('next-option').disabled = busy || nextRank >= rankedBatch.length;
+  $('next-option').textContent = nextRank < rankedBatch.length ? `Try option ${nextRank+1}` : 'All 3 options shown';
+  $('team-cards').innerHTML = comparisonOptions.map(option => `<section class="team-option ${option.id === division.id ? 'active-option' : ''}" id="option-${option.id}" aria-label="${escapeHtml(option.label)}">
+    <div class="option-heading"><div><h3>${escapeHtml(option.label)}</h3><p class="muted">Rating difference: ${Math.abs(option.sumA-option.sumB).toFixed(1)} · Saved teams #${option.id}</p><p class="roster-note">${option.signature !== selectionSignature() ? 'Attendance has changed since these teams were made.' : ''}</p></div><button type="button" class="button secondary" data-use-option="${option.id}" aria-pressed="${option.id === division.id}">${option.id === division.id ? 'Selected' : 'Use these teams'}</button></div>
+    <div class="team-cards">${['A','B'].map(team => `<article class="team-card"><div class="team-head"><h3>Team ${team}</h3><span>${option[`sum${team}`].toFixed(1)} total rating</span></div>${option[`team${team}`].map((p,i) => `<div class="team-player"><span class="number">0${i+1}</span><span>${escapeHtml(p.name)}</span><span class="rating">${p.rating.toFixed(1)}</span></div>`).join('')}</article>`).join('')}</div>
+    <div class="substitutes">${option.substitutes.length ? `<strong>On the bench (${option.substitutes.length})</strong> &nbsp; ${option.substitutes.map(escapeHtml).join(' · ')}` : 'No substitutes.'}</div>
+  </section>`).join('');
+}
+function useOption(option) {
+  division = option; generatedIds = option.signature; renderTeams();
+  $(`option-${option.id}`).scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block:'start'});
 }
 async function generate(random = false) {
   if (busy || selected.size < 10) return;
-  busy = true; renderSelection(); $('remake').disabled = true;
+  busy = true; renderSelection(); $('remake').disabled = true; $('next-option').disabled = true;
   const signature = selectionSignature();
   try {
-    division = await api('/api/teams', {playerIds:[...selected], random}); generatedIds = signature;
+    const data = await api('/api/teams', {playerIds:[...selected], random, alternatives:!random});
+    const batch = random ? [data] : data.options;
+    if (!batch?.length) throw new Error('No team options were returned. Refresh the page and try again.');
+    const round = comparisonOptions.filter(o => o.rank === 1).length + 1;
+    batch.forEach((option,i) => {
+      option.signature = signature; option.rank = random ? null : i+1;
+      option.label = random ? 'Random split' : `${round > 1 ? `Round ${round} · ` : ''}Option ${i+1}${data.exact === false ? ' · sampled' : ''}`;
+    });
+    comparisonOptions.push(...batch);
+    if (!random) { rankedBatch = batch; nextRank = 1; }
+    division = batch[0]; generatedIds = signature;
     renderTeams(); $('results').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block:'start'});
   } catch(e) { toast(e.message); }
-  finally { busy = false; renderSelection(); $('remake').disabled = false; }
+  finally { busy = false; renderSelection(); $('remake').disabled = false; if (division) renderTeams(); }
 }
 function renderCatalogue() {
   const sort = $('catalogue-sort').value;
@@ -132,6 +158,8 @@ $('search').addEventListener('input', renderRoster); $('sort').addEventListener(
 $('catalogue-search').addEventListener('input', renderCatalogue); $('catalogue-sort').addEventListener('change', renderCatalogue);
 $('select-all').onclick = () => { if (!busy) { selected = new Set(players.filter(p => p.ratingReady !== false).map(p => p.id)); remember(); renderRoster(); } };
 $('clear').onclick = () => { if (!busy) { selected.clear(); remember(); renderRoster(); } };
+$('next-option').onclick = () => { if (!busy && nextRank < rankedBatch.length) useOption(rankedBatch[nextRank++]); };
+$('team-cards').addEventListener('click', e => { const button = e.target.closest('[data-use-option]'); if (button && !busy) { const option = comparisonOptions.find(o => o.id === button.dataset.useOption); if (option) useOption(option); } });
 $('generate').onclick = () => generate(); $('remake').onclick = () => generate(true);
 $('refresh').onclick = () => refresh(true);
 document.querySelectorAll('[data-view]').forEach(el => el.onclick = () => setView(el.dataset.view));

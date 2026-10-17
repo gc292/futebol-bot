@@ -14,3 +14,5 @@
  .voting-page .roster-note { font-size: 14px; line-height: 1.6; }
  .voting-page .field { margin-bottom: 18px; }
  .voting-page .button { text-decoration: none; }
+
+.team-options{display:grid;gap:24px}.team-option{padding:18px;border:2px solid var(--line);border-radius:5px;scroll-margin-top:24px}.team-option.active-option{border-color:var(--green)}.option-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}.option-heading h3{margin:0 0 8px}.option-heading .muted{font-size:12px;margin:0}.option-heading .roster-note:empty{display:none}.option-heading .button{flex-shrink:0}.option-heading [aria-pressed=true]{background:var(--green);color:white}@media(max-width:700px){.team-option{padding:12px}.option-heading{align-items:flex-start;flex-direction:column}.option-heading .button{width:100%}}

@@ -28,6 +28,18 @@ class WebIntegrationTest {
         }
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
+    @Test void threeRankedAlternativesAreDistinctSavedAndCanEachBeLogged() throws Exception {
+        var ids=store.players("guild").subList(0,11).stream().map(Player::id).toList();
+        var response=request("/api/teams",new Gson().toJson(Map.of("playerIds",ids,"alternatives",true)));
+        assertEquals(201,response.statusCode(),response.body());var data=JsonParser.parseString(response.body()).getAsJsonObject();assertTrue(data.get("exact").getAsBoolean());
+        var options=data.getAsJsonArray("options");assertEquals(3,options.size());double previous=-1;var keys=new HashSet<String>();
+        for(var entry:options) {
+            var o=entry.getAsJsonObject();double gap=Math.abs(o.get("sumA").getAsDouble()-o.get("sumB").getAsDouble());assertTrue(gap+1e-9>=previous);previous=gap;
+            var saved=store.division("guild",o.get("id").getAsLong());assertEquals(5,saved.teamA().size());assertEquals(5,saved.teamB().size());assertEquals(1,o.getAsJsonArray("substitutes").size());
+            var sides=new ArrayList<>(List.of(saved.teamA().stream().map(Player::id).sorted().toList().toString(),saved.teamB().stream().map(Player::id).sorted().toList().toString()));sides.sort(String::compareTo);assertTrue(keys.add(sides.toString()));
+            response=request("/api/results/review",new Gson().toJson(Map.of("divisionId",o.get("id").getAsString(),"goalsA",1,"goalsB",0,"playedAt",java.time.Instant.now().minusSeconds(60).toString())));assertEquals(200,response.statusCode(),response.body());
+        }
+    }
     @Test void newPlayersPersistAndUseTheirActualRatingsInSharedDivisions() throws Exception {
         var response = request("/api/players", "{\"name\":\"New teammate\",\"rating\":99.5}");
         assertEquals(201, response.statusCode());

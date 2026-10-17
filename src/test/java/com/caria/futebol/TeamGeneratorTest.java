@@ -9,6 +9,34 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TeamGeneratorTest {
+    @Test void rankedOptionsMatchTheThreeBestDistinctSplitsIncludingTiesAndSubstitutes() {
+        for (double[] ratings:List.of(new double[]{89,87,77,67,62,32,24,21,16,14},new double[]{98,83,72,62,51,44,39,31,22,13,7},new double[]{50,50,50,50,50,50,50,50,50,50,50,50},new double[]{8.1,8.2,8.3,4.4,5.5,6.6,7.7,9.8,9.9,10.1})) {
+            var names=java.util.stream.IntStream.range(0,ratings.length).mapToObj(i -> "P"+i).toList();
+            java.util.function.ToDoubleFunction<String> score=n -> ratings[Integer.parseInt(n.substring(1))];
+            List<Double> gaps=new ArrayList<>();
+            for(int a=0;a<(1<<ratings.length);a++) if(Integer.bitCount(a)==5)
+                for(int b=a+1;b<(1<<ratings.length);b++) if(Integer.bitCount(b)==5 && (a&b)==0) {
+                    double aa=0,bb=0;for(int i=0;i<ratings.length;i++){if((a&(1<<i))!=0)aa+=ratings[i];if((b&(1<<i))!=0)bb+=ratings[i];}
+                    gaps.add(Math.abs(aa-bb));
+                }
+            gaps.sort(Double::compare);var options=TeamGenerator.rankedOptions(names,score);assertEquals(3,options.size());
+            var keys=new HashSet<String>();
+            for(int i=0;i<3;i++) {
+                Teams t=options.get(i);assertEquals(gaps.get(i),Math.abs(t.sumA-t.sumB),1e-9);
+                assertEquals(5,t.teamA.size());assertEquals(5,t.teamB.size());
+                var all=new HashSet<>(t.teamA);all.addAll(t.teamB);assertEquals(10,all.size());assertTrue(names.containsAll(all));
+                var sides=new ArrayList<>(List.of(t.teamA.stream().sorted().toList().toString(),t.teamB.stream().sorted().toList().toString()));sides.sort(String::compareTo);assertTrue(keys.add(sides.toString()));
+            }
+            assertEquals(options.get(0).teamA,TeamGenerator.rankedOptions(names,score).get(0).teamA);
+        }
+    }
+    @Test void rankedOptionsHandleLargeGroupsAndKeepAllAttendeesAvailable() {
+        for(int n:List.of(24,25)) {
+            var names=java.util.stream.IntStream.range(0,n).mapToObj(i -> "P"+i).toList();
+            var options=TeamGenerator.rankedOptions(names,x -> 50);assertEquals(3,options.size());
+            for(Teams t:options){assertEquals(0,Math.abs(t.sumA-t.sumB));var ids=new HashSet<>(t.teamA);ids.addAll(t.teamB);assertEquals(10,ids.size());}
+        }
+    }
     @Test void fixesAGreedySplitThatMissedAMuchCloserMatch() {
         double[] scores={89,87,77,67,62,32,24,21,16,14};
         var names=java.util.stream.IntStream.range(0,10).mapToObj(i -> "P"+i).toList();

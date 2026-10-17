@@ -62,3 +62,15 @@ assert len(request(other,'/api/history')['matches'])==1
 stats=next(x for x in request(other,'/api/players')['players'] if x['id']==winner['id']);assert (stats['games'],stats['wins'],stats['points'],stats['goalDifference'])==(1,0,1,0)
 request(admin,'/api/results/confirm',{'draftId':review['draftId'],'revision':review['revision']},400)
 print('PASS: public browsing, protected logging/deletion, stale deletion and statistics recalculation, fixed scores, anonymous editable votes, cleanup, teams, generated/manual results, duplicate protection, statistics, archive/restore and nested URLs.')
+
+ids=[x['id'] for x in request(other,'/api/players')['players'] if x.get('ratingReady',True)][:11]
+ranked=request(other,'/api/teams',{'playerIds':ids,'alternatives':True},201)
+assert ranked['exact'] is True and len(ranked['options'])==3
+gaps=[abs(o['sumA']-o['sumB']) for o in ranked['options']];assert gaps==sorted(gaps)
+keys=set()
+saved={x['id'] for x in request(other,'/api/divisions')['divisions']}
+for o in ranked['options']:
+    key=tuple(sorted(tuple(sorted(p['id'] for p in o[side])) for side in ['teamA','teamB']))
+    assert key not in keys and o['id'] in saved;keys.add(key)
+    assert len(o['teamA'])==len(o['teamB'])==5 and len(o['substitutes'])==len(ids)-10
+print('PASS: ranked alternatives API and each option saved for logging.')

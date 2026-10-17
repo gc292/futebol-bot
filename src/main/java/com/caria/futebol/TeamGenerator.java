@@ -70,6 +70,52 @@ final class TeamGenerator {
         }
         return new Pick10Result(bestTen,substitutesFor(confirmed,bestTen),best);
     }
+    /** Three distinct splits in increasing rating-gap order; A/B swaps count once. */
+    static List<Teams> rankedOptions(List<String> confirmed, ToDoubleFunction<String> ratingOf) {
+        validate(confirmed,ratingOf);
+        List<String> pool = new ArrayList<>(confirmed);
+        Collections.sort(pool);
+        if (pool.size() > EXACT_POOL_LIMIT) {
+            List<Teams> best = new ArrayList<>(); Set<String> seen = new HashSet<>();
+            for (int attempt=0;attempt<PICK_10_TRIES;attempt++) {
+                Collections.shuffle(pool);
+                for (Teams teams:rankedOptions(pool.subList(0,10),ratingOf)) {
+                    String a=teams.teamA.stream().sorted().toList().toString(), b=teams.teamB.stream().sorted().toList().toString();
+                    String key=a.compareTo(b)<0 ? a+"|"+b : b+"|"+a;
+                    if (!seen.add(key)) continue;
+                    best.add(teams); best.sort(Comparator.comparingDouble(t -> Math.abs(t.sumA-t.sumB)));
+                    if (best.size()>3) best.remove(3);
+                }
+                if (best.size()==3 && Math.abs(best.get(2).sumA-best.get(2).sumB)==0) break;
+            }
+            return best;
+        }
+        double[] scores=pool.stream().mapToDouble(ratingOf).toArray();
+        List<Five> choices=new ArrayList<>();
+        for (int a=0;a<scores.length-4;a++) for (int b=a+1;b<scores.length-3;b++)
+            for (int c=b+1;c<scores.length-2;c++) for (int d=c+1;d<scores.length-1;d++) for (int e=d+1;e<scores.length;e++)
+                choices.add(new Five((1<<a)|(1<<b)|(1<<c)|(1<<d)|(1<<e),scores[a]+scores[b]+scores[c]+scores[d]+scores[e]));
+        choices.sort(Comparator.comparingDouble(Five::sum).thenComparingInt(Five::mask));
+        record Pair(int a,int b,double gap) {}
+        List<Pair> best=new ArrayList<>();
+        for (int i=0;i<choices.size();i++) for (int j=i+1;j<choices.size();j++) {
+            Five a=choices.get(i), b=choices.get(j); double gap=b.sum()-a.sum();
+            if (best.size()==3 && gap>=best.get(2).gap()) break;
+            if ((a.mask()&b.mask())!=0) continue;
+            best.add(new Pair(a.mask(),b.mask(),gap)); best.sort(Comparator.comparingDouble(Pair::gap));
+            if (best.size()>3) best.remove(3);
+        }
+        List<Teams> result=new ArrayList<>();
+        for (Pair pair:best) {
+            Teams teams=new Teams();
+            for(int i=0;i<pool.size();i++) {
+                if ((pair.a()&(1<<i))!=0) { teams.teamA.add(pool.get(i)); teams.sumA+=scores[i]; }
+                if ((pair.b()&(1<<i))!=0) { teams.teamB.add(pool.get(i)); teams.sumB+=scores[i]; }
+            }
+            result.add(teams);
+        }
+        return result;
+    }
     static Teams splitIntoBalanced5v5(List<String> tenPlayers) {
         return splitIntoBalanced5v5(tenPlayers,PlayerCatalog::rankOf);
     }
