@@ -9,6 +9,52 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TeamGeneratorTest {
+    @Test void exactTopThreeMatchUnprunedIntegerOracleAcrossSixtyPools() {
+        var rng=new java.util.Random(20261017);
+        for(int trial=0;trial<60;trial++) {
+            int n=10+trial%5; long[] units=new long[n];
+            for(int i=0;i<n;i++) units[i]=trial%10==0 ? 50000 : rng.nextInt(100001);
+            var names=java.util.stream.IntStream.range(0,n).mapToObj(i -> String.format("P%02d",i)).toList();
+            List<Integer> masks=new ArrayList<>();List<Long> sums=new ArrayList<>();
+            for(int mask=0;mask<(1<<n);mask++) if(Integer.bitCount(mask)==5) {
+                long sum=0;for(int i=0;i<n;i++)if((mask&(1<<i))!=0)sum+=units[i];masks.add(mask);sums.add(sum);
+            }
+            long[] expected={Long.MAX_VALUE,Long.MAX_VALUE,Long.MAX_VALUE};
+            // Independent oracle: visit every disjoint pair, no sum sorting or pruning.
+            for(int a=0;a<masks.size();a++)for(int b=a+1;b<masks.size();b++)if((masks.get(a)&masks.get(b))==0){
+                long gap=Math.abs(sums.get(a)-sums.get(b));
+                if(gap<expected[2]){expected[2]=gap;java.util.Arrays.sort(expected);}
+            }
+            var options=TeamGenerator.rankedOptions(names,name -> units[Integer.parseInt(name.substring(1))]/1000.0);
+            var keys=new HashSet<String>();
+            for(int i=0;i<3;i++){
+                Teams t=options.get(i);assertEquals(expected[i]/5000.0,Math.abs(t.sumA/5-t.sumB/5),1e-9,"Trial "+trial+" option "+i);
+                var used=new HashSet<>(t.teamA);used.addAll(t.teamB);assertEquals(10,used.size());
+                var sides=new ArrayList<>(List.of(t.teamA.toString(),t.teamB.toString()));sides.sort(String::compareTo);assertTrue(keys.add(sides.toString()));
+            }
+            var reversed=new ArrayList<>(names);java.util.Collections.reverse(reversed);
+            assertEquals(options.get(0).teamA,TeamGenerator.rankedOptions(reversed,name -> units[Integer.parseInt(name.substring(1))]/1000.0).get(0).teamA);
+        }
+    }
+    @Test void exactSearchBeyondOldCutoffFindsAnalyticallyKnownTopThreeAndHandlesBit31() {
+        // For powers of two the smallest gaps are 31,47,47 units across any pool >=11.
+        // This fixture has no perfect ties, so a zero-gap shortcut cannot mask sampling.
+        for(int n:List.of(25,32)) {
+            var names=java.util.stream.IntStream.range(0,n).mapToObj(i -> String.format("P%02d",i)).toList();
+            var options=TeamGenerator.rankedOptions(names,name -> Math.scalb(1.0,Integer.parseInt(name.substring(1))-26));
+            double[] expected={31,47,47};
+            for(int i=0;i<3;i++)assertEquals(Math.scalb(expected[i],-26)/5,Math.abs(options.get(i).sumA/5-options.get(i).sumB/5),1e-14);
+        }
+        var tooMany=java.util.stream.IntStream.range(0,33).mapToObj(i -> "P"+i).toList();
+        assertTrue(assertThrows(FootballException.class,()->TeamGenerator.rankedOptions(tooMany,n -> 50)).getMessage().contains("32"));
+        assertEquals(10,TeamGenerator.pickRandom10(tooMany).chosenPlayers.size());
+        var highBit=java.util.stream.IntStream.range(0,32).mapToObj(i -> String.format("P%02d",i)).toList();
+        var forced=TeamGenerator.rankedOptions(highBit,name -> {
+            int i=Integer.parseInt(name.substring(1));return i<9 ? 0 : i==31 ? Math.scalb(1.0,-16) : Math.scalb(1.0,i-24);
+        });
+        for(Teams t:forced){assertTrue(t.teamA.contains("P31")||t.teamB.contains("P31"));assertEquals(Math.scalb(1.0,-16),Math.abs(t.sumA-t.sumB));}
+
+    }
     @Test void rankedOptionsMatchTheThreeBestDistinctSplitsIncludingTiesAndSubstitutes() {
         for (double[] ratings:List.of(new double[]{89,87,77,67,62,32,24,21,16,14},new double[]{98,83,72,62,51,44,39,31,22,13,7},new double[]{50,50,50,50,50,50,50,50,50,50,50,50},new double[]{8.1,8.2,8.3,4.4,5.5,6.6,7.7,9.8,9.9,10.1})) {
             var names=java.util.stream.IntStream.range(0,ratings.length).mapToObj(i -> "P"+i).toList();

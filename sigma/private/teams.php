@@ -13,44 +13,17 @@ function makeTeams(array $players,bool $random): array {
  $n=count($players);if($n<10)fail('Select at least 10 rated players.');shuffle($players);
  if($random) return [array_slice($players,0,5),array_slice($players,5,5),array_slice($players,10)];
  if($n===10){[$a,$b]=balancedTen($players);return [$a,$b,[]];}
- $best=INF;$chosen=[];
- if($n<=24){
-  $combinations=[];
-  for($a=0;$a<$n-4;$a++)for($b=$a+1;$b<$n-3;$b++)for($c=$b+1;$c<$n-2;$c++)for($d=$c+1;$d<$n-1;$d++)for($e=$d+1;$e<$n;$e++)
-   $combinations[]=[(1<<$a)|(1<<$b)|(1<<$c)|(1<<$d)|(1<<$e),$players[$a]['rating']+$players[$b]['rating']+$players[$c]['rating']+$players[$d]['rating']+$players[$e]['rating']];
-  usort($combinations,fn($a,$b)=>$a[1]<=>$b[1]);$size=count($combinations);
-  for($i=0;$i<$size;$i++)for($j=$i+1;$j<$size;$j++){
-   $gap=$combinations[$j][1]-$combinations[$i][1];if($gap>=$best)break;
-   if(($combinations[$i][0]&$combinations[$j][0])!==0)continue;
-   $best=$gap;$mask=$combinations[$i][0]|$combinations[$j][0];$chosen=[];
-   foreach($players as $k=>$p)if(($mask&(1<<$k))!==0)$chosen[]=$p;
-   if($best==0.0)break 2;break;
-  }
- } else {
-  for($i=0;$i<4000;$i++){shuffle($players);$ten=array_slice($players,0,10);[,,$gap]=balancedTen($ten);if($gap<$best){$best=$gap;$chosen=$ten;if($gap==0.0)break;}}
- }
- [$a,$b]=balancedTen($chosen);$ids=array_column($chosen,'id');$subs=array_values(array_filter($players,fn($p)=>!in_array($p['id'],$ids,true)));return [$a,$b,$subs];
+ return rankedTeamOptions($players)[0];
 }
 
 /** Three distinct splits; each unordered pair of five-player subsets appears once. */
 function rankedTeamOptions(array $players): array {
  $n=count($players);if($n<10)fail('Select at least 10 rated players.');
  usort($players,fn($a,$b)=>strcmp($a['name'],$b['name']));
- if($n>24){
-  $best=[];$seen=[];
-  for($i=0;$i<4000;$i++){
-   shuffle($players);
-   foreach(rankedTeamOptions(array_slice($players,0,10)) as [$a,$b]){
-    $aa=array_column($a,'id');$bb=array_column($b,'id');sort($aa);sort($bb);$parts=[implode(',',$aa),implode(',',$bb)];sort($parts);$key=implode('|',$parts);
-    if(isset($seen[$key]))continue;$seen[$key]=true;
-    $ids=array_column(array_merge($a,$b),'id');$subs=array_values(array_filter($players,fn($p)=>!in_array($p['id'],$ids,true)));
-    $best[]=[$a,$b,$subs,abs(array_sum(array_column($a,'rating'))-array_sum(array_column($b,'rating')))];
-    usort($best,fn($a,$b)=>$a[3]<=>$b[3]);$best=array_slice($best,0,3);
-   }
-   if(count($best)===3&&$best[2][3]==0.0)break;
-  }
-  return array_map(fn($x)=>array_slice($x,0,3),$best);
- }
+ if($n>32)fail('Choose at most 32 attendees for guaranteed optimal teams. Narrow the selection or use random shuffle.');
+ if(count(array_unique(array_column($players,'id')))!==$n)fail('Choose different players.');
+ foreach($players as $p)if(!is_finite((float)$p['rating']))fail('Every player needs a finite rating.');
+ // Sorted sums bound the remaining gaps; pruning never depends on overlapping players.
  $choices=[];
  for($a=0;$a<$n-4;$a++)for($b=$a+1;$b<$n-3;$b++)for($c=$b+1;$c<$n-2;$c++)for($d=$c+1;$d<$n-1;$d++)for($e=$d+1;$e<$n;$e++)
   $choices[]=[(1<<$a)|(1<<$b)|(1<<$c)|(1<<$d)|(1<<$e),$players[$a]['rating']+$players[$b]['rating']+$players[$c]['rating']+$players[$d]['rating']+$players[$e]['rating']];

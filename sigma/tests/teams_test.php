@@ -28,3 +28,32 @@ foreach([[89,87,77,67,62,32,24,21,16,14],[98,83,72,62,51,44,39,31,22,13,7],[50,5
 }
 foreach([24,25] as $n){$p=[];for($i=0;$i<$n;$i++)$p[]=['id'=>(string)$i,'name'=>'P'.$i,'rating'=>50];$options=rankedTeamOptions($p);check(count($options)===3,'Large group alternatives');foreach($options as [$a,$b,$subs])check(count($subs)===$n-10,'Missing substitutes');}
 echo "PASS: top three match exhaustive ranked oracle, ties, fractional ratings, no swapped duplicates, and 24/25-player pools.\n";
+
+mt_srand(20261017);$start=microtime(true);
+for($trial=0;$trial<60;$trial++){
+ $n=10+$trial%5;$units=[];$players=[];
+ for($i=0;$i<$n;$i++){$units[$i]=$trial%10===0?50000:mt_rand(0,100000);$players[]=['id'=>(string)$i,'name'=>sprintf('P%02d',$i),'rating'=>$units[$i]/1000];}
+ $masks=[];$sums=[];
+ for($mask=0;$mask<(1<<$n);$mask++)if(substr_count(decbin($mask),'1')===5){$sum=0;foreach($units as $i=>$u)if(($mask&(1<<$i))!==0)$sum+=$u;$masks[]=$mask;$sums[]=$sum;}
+ $best=[PHP_INT_MAX,PHP_INT_MAX,PHP_INT_MAX];$count=count($masks);
+ for($a=0;$a<$count;$a++)for($b=$a+1;$b<$count;$b++)if(($masks[$a]&$masks[$b])===0){$gap=abs($sums[$a]-$sums[$b]);if($gap<$best[2]){$best[2]=$gap;sort($best);}}
+ $options=rankedTeamOptions($players);$keys=[];
+ foreach($options as $i=>[$a,$b,$subs]){
+  $gap=abs(array_sum(array_column($a,'rating'))/5-array_sum(array_column($b,'rating'))/5);
+  check(abs($gap-$best[$i]/5000)<1e-9,'Integer oracle mismatch trial '.$trial.' option '.$i);
+  $sides=[implode(',',array_column($a,'id')),implode(',',array_column($b,'id'))];sort($sides);$key=implode('|',$sides);check(!isset($keys[$key]),'Duplicate alternative');$keys[$key]=true;
+  check(count(array_unique(array_column(array_merge($a,$b,$subs),'id')))===$n,'Lost player');
+ }
+ $again=rankedTeamOptions(array_reverse($players));check($again===$options,'Input order changes exact results');
+}
+echo 'PASS: 60 unpruned integer-oracle pools (10–14 attendees), all three average gaps; '.round(microtime(true)-$start,3)."s\n";
+foreach([25,32] as $n){
+ $players=[];for($i=0;$i<$n;$i++)$players[]=['id'=>(string)$i,'name'=>sprintf('P%02d',$i),'rating'=>2**($i-26)];
+ $start=microtime(true);$options=rankedTeamOptions($players);
+ foreach($options as $i=>[$a,$b,$subs]){check(abs(abs(array_sum(array_column($a,'rating'))/5-array_sum(array_column($b,'rating'))/5)-[31,47,47][$i]/(2**26*5))<1e-14,'Analytical optimum failed');check(count($subs)===$n-10,'Substitutes missing');}
+ echo 'PASS: '.$n.'-attendee exact analytical benchmark '.round(microtime(true)-$start,3).'s, peak '.round(memory_get_peak_usage(true)/1048576,1)." MiB\n";
+}
+$tooMany=$players;$tooMany[]=['id'=>'32','name'=>'P32','rating'=>50];$blocked=false;try{rankedTeamOptions($tooMany);}catch(ApiError $e){$blocked=str_contains($e->getMessage(),'32');}check($blocked,'Must not silently sample oversized pools');check(count(makeTeams($tooMany,true)[0])===5,'Random mode still works');
+
+$forced=[];for($i=0;$i<32;$i++)$forced[]=['id'=>(string)$i,'name'=>sprintf('P%02d',$i),'rating'=>$i<9?0:($i===31?2**(-16):2**($i-24))];
+foreach(rankedTeamOptions($forced) as [$a,$b]){check(in_array('31',array_column(array_merge($a,$b),'id'),true),'High-bit player lost');check(abs(array_sum(array_column($a,'rating'))-array_sum(array_column($b,'rating')))===2**(-16),'High-bit optimum failed');}

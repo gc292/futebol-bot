@@ -173,7 +173,7 @@ public final class WebMain {
                             options.add(Map.of("id",Long.toString(saved.id()),"teamA",saved.teamA().stream().map(WebMain::player).toList(),
                                 "teamB",saved.teamB().stream().map(WebMain::player).toList(),"sumA",teams.sumA,"sumB",teams.sumB,"substitutes",subs,"random",false));
                         }
-                        reply(x,201,Map.of("options",options,"exact",names.size()<=24)); return;
+                        reply(x,201,Map.of("options",options,"exact",true)); return;
                     }
                     Pick10Result pick = random ? TeamGenerator.pickRandom10(names) : TeamGenerator.pickBest10ForBalance(names, ratings::get);
                     Teams teams = random ? TeamGenerator.splitRandom5v5(pick.chosenPlayers, ratings::get)
