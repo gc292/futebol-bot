@@ -45,28 +45,33 @@ function renderSelection() {
   $('generate').innerHTML = busy ? 'Making teams…' : 'Make the teams <span>↗</span>';
   if (division) {
     renderDivisionLabel();
-    document.querySelectorAll('[data-use-option]').forEach(button => {
-      const option = comparisonOptions.find(o => o.id === button.dataset.useOption);
-      if (option) button.closest('.team-option').querySelector('.roster-note').textContent = option.signature !== selectionSignature() ? 'Attendance has changed since these teams were made.' : '';
-    });
+    const note = $('team-cards').querySelector('.roster-note');
+    if (note) note.textContent = division.signature !== selectionSignature() ? 'Attendance has changed since these teams were made.' : '';
   }
 }
 function togglePlayer(id) { if (busy || players.find(p => p.id === id)?.ratingReady === false) return; selected.has(id) ? selected.delete(id) : selected.add(id); remember(); renderRoster(); }
 function selectionSignature() { return [...selected].sort().join(','); }
+function sortedTeam(team) { return [...team].sort((a,b) => b.rating-a.rating || a.name.localeCompare(b.name)); }
+function averageRating(team) { return team.length ? team.reduce((sum,p) => sum+p.rating,0)/team.length : 0; }
+function averageDifference(option) { return Math.abs(averageRating(option.teamA)-averageRating(option.teamB)); }
 function renderDivisionLabel() {
-  $('division-label').textContent = `Selected: ${division.label || "Teams"} · Saved division #${division.id} · ${division.random ? 'Random split' : `Rating difference: ${Math.abs(division.sumA-division.sumB).toFixed(1)}`} ${generatedIds !== selectionSignature() ? '· Attendance has changed. Generate again for this selection.' : ''}`;
+  $('division-label').textContent = `Selected: ${division.label || "Teams"} · Saved division #${division.id} · ${division.random ? 'Random split' : `Average difference: ${averageDifference(division).toFixed(1)}`} ${generatedIds !== selectionSignature() ? '· Attendance has changed. Generate again for this selection.' : ''}`;
 }
 function renderTeams() {
   $('log-generated').disabled = false;
   $('results').hidden = false;
   renderDivisionLabel();
   $('next-option').disabled = busy || nextRank >= rankedBatch.length;
-  $('next-option').textContent = nextRank < rankedBatch.length ? `Try option ${nextRank+1}` : 'All 3 options shown';
-  $('team-cards').innerHTML = comparisonOptions.map(option => `<section class="team-option ${option.id === division.id ? 'active-option' : ''}" id="option-${option.id}" aria-label="${escapeHtml(option.label)}">
-    <div class="option-heading"><div><h3>${escapeHtml(option.label)}</h3><p class="muted">Rating difference: ${Math.abs(option.sumA-option.sumB).toFixed(1)} · Saved teams #${option.id}</p><p class="roster-note">${option.signature !== selectionSignature() ? 'Attendance has changed since these teams were made.' : ''}</p></div><button type="button" class="button secondary" data-use-option="${option.id}" aria-pressed="${option.id === division.id}">${option.id === division.id ? 'Selected' : 'Use these teams'}</button></div>
-    <div class="team-cards">${['A','B'].map(team => `<article class="team-card"><div class="team-head"><h3>Team ${team}</h3><span>${option[`sum${team}`].toFixed(1)} total rating</span></div>${option[`team${team}`].map((p,i) => `<div class="team-player"><span class="number">0${i+1}</span><span>${escapeHtml(p.name)}</span><span class="rating">${p.rating.toFixed(1)}</span></div>`).join('')}</article>`).join('')}</div>
+  $('next-option').textContent = nextRank < rankedBatch.length ? `Show option ${nextRank+1}` : 'All 3 options available';
+  $('team-option-select').innerHTML = comparisonOptions.map(option => `<option value="${option.id}">${escapeHtml(option.label)} · average difference ${averageDifference(option).toFixed(1)}</option>`).join('');
+  $('team-option-select').value = division.id;
+  $('team-option-select').disabled = busy;
+  const option = division;
+  $('team-cards').innerHTML = `<section class="team-option ${option.id === division.id ? 'active-option' : ''}" id="option-${option.id}" aria-label="${escapeHtml(option.label)}">
+    <div class="option-heading"><div><h3>${escapeHtml(option.label)}</h3><p class="muted">Average difference: ${averageDifference(option).toFixed(1)} · Saved teams #${option.id}</p><p class="roster-note">${option.signature !== selectionSignature() ? 'Attendance has changed since these teams were made.' : ''}</p></div></div>
+    <div class="team-cards">${['A','B'].map(team => `<article class="team-card"><div class="team-head"><h3>Team ${team}</h3><span>${averageRating(option[`team${team}`]).toFixed(1)} average rating</span></div>${sortedTeam(option[`team${team}`]).map((p,i) => `<div class="team-player"><span class="number">0${i+1}</span><span>${escapeHtml(p.name)}</span><span class="rating">${p.rating.toFixed(1)}</span></div>`).join('')}</article>`).join('')}</div>
     <div class="substitutes">${option.substitutes.length ? `<strong>On the bench (${option.substitutes.length})</strong> &nbsp; ${option.substitutes.map(escapeHtml).join(' · ')}` : 'No substitutes.'}</div>
-  </section>`).join('');
+  </section>`;
 }
 function useOption(option) {
   division = option; generatedIds = option.signature; renderTeams();
@@ -85,7 +90,7 @@ async function generate(random = false) {
       option.signature = signature; option.rank = random ? null : i+1;
       option.label = random ? 'Random split' : `${round > 1 ? `Round ${round} · ` : ''}Option ${i+1}${data.exact === false ? ' · sampled' : ''}`;
     });
-    comparisonOptions.push(...batch);
+    comparisonOptions.push(batch[0]);
     if (!random) { rankedBatch = batch; nextRank = 1; }
     division = batch[0]; generatedIds = signature;
     renderTeams(); $('results').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block:'start'});
@@ -158,8 +163,17 @@ $('search').addEventListener('input', renderRoster); $('sort').addEventListener(
 $('catalogue-search').addEventListener('input', renderCatalogue); $('catalogue-sort').addEventListener('change', renderCatalogue);
 $('select-all').onclick = () => { if (!busy) { selected = new Set(players.filter(p => p.ratingReady !== false).map(p => p.id)); remember(); renderRoster(); } };
 $('clear').onclick = () => { if (!busy) { selected.clear(); remember(); renderRoster(); } };
-$('next-option').onclick = () => { if (!busy && nextRank < rankedBatch.length) useOption(rankedBatch[nextRank++]); };
-$('team-cards').addEventListener('click', e => { const button = e.target.closest('[data-use-option]'); if (button && !busy) { const option = comparisonOptions.find(o => o.id === button.dataset.useOption); if (option) useOption(option); } });
+$('next-option').onclick = () => {
+  if (busy || nextRank >= rankedBatch.length) return;
+  const option = rankedBatch[nextRank++];
+  comparisonOptions.push(option);
+  useOption(option);
+};
+$('team-option-select').onchange = () => {
+  if (busy) return;
+  const option = comparisonOptions.find(o => o.id === $('team-option-select').value);
+  if (option) useOption(option);
+};
 $('generate').onclick = () => generate(); $('remake').onclick = () => generate(true);
 $('refresh').onclick = () => refresh(true);
 document.querySelectorAll('[data-view]').forEach(el => el.onclick = () => setView(el.dataset.view));
@@ -210,7 +224,7 @@ $('previous').onclick = () => { if (historyPage > 0) { historyPage--; refreshHis
 $('next').onclick = () => { historyPage++; refreshHistory(); };
 $('copy').onclick = async () => {
   if (!division) return;
-  const text = `Futebol · Division #${division.id}\n\nTeam A (${division.sumA.toFixed(1)})\n${division.teamA.map(p => `${p.name} (${p.rating.toFixed(1)})`).join('\n')}\n\nTeam B (${division.sumB.toFixed(1)})\n${division.teamB.map(p => `${p.name} (${p.rating.toFixed(1)})`).join('\n')}${division.substitutes.length ? '\n\nSubstitutes: '+division.substitutes.join(', ') : ''}\n\nRating difference: ${Math.abs(division.sumA-division.sumB).toFixed(1)}`;
+  const text = `Futebol · Division #${division.id}\n\nTeam A (average ${averageRating(division.teamA).toFixed(1)})\n${sortedTeam(division.teamA).map(p => `${p.name} (${p.rating.toFixed(1)})`).join('\n')}\n\nTeam B (average ${averageRating(division.teamB).toFixed(1)})\n${sortedTeam(division.teamB).map(p => `${p.name} (${p.rating.toFixed(1)})`).join('\n')}${division.substitutes.length ? '\n\nSubstitutes: '+division.substitutes.join(', ') : ''}\n\nAverage difference: ${averageDifference(division).toFixed(1)}`;
   try {
     if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
     else { const field = document.createElement('textarea'); field.value = text; document.body.appendChild(field); field.select(); const ok = document.execCommand('copy'); field.remove(); if (!ok) throw new Error('copy unavailable'); }

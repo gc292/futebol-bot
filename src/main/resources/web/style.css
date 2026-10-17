@@ -16,3 +16,5 @@
  .voting-page .button { text-decoration: none; }
 
 .team-options{display:grid;gap:24px}.team-option{padding:18px;border:2px solid var(--line);border-radius:5px;scroll-margin-top:24px}.team-option.active-option{border-color:var(--green)}.option-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}.option-heading h3{margin:0 0 8px}.option-heading .muted{font-size:12px;margin:0}.option-heading .roster-note:empty{display:none}.option-heading .button{flex-shrink:0}.option-heading [aria-pressed=true]{background:var(--green);color:white}@media(max-width:700px){.team-option{padding:12px}.option-heading{align-items:flex-start;flex-direction:column}.option-heading .button{width:100%}}
+
+.option-picker{display:flex;align-items:center;gap:12px;margin:16px 0;font-size:13px}.option-picker select{max-width:100%;flex:1;padding:12px;border:1px solid var(--line);border-radius:3px;background:var(--white);color:var(--ink)}@media(max-width:700px){.option-picker{align-items:stretch;flex-direction:column}}
