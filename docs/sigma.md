@@ -114,3 +114,5 @@ A 500 response contains no database credentials; detailed errors go to the hosti
 ### Updating an existing deployment
 
 Rebuild with `py tools/build_sigma.py sigma-deploy`, then upload `sigma-deploy/football-private` to your home directory and `sigma-deploy/web/futebol` to `~/web/` as above. Your private `config.php` is not overwritten. Reload the website with Ctrl+F5. There is no database migration for public browsing or game deletion. An old `web_key` entry may be removed from config.php; it is ignored. Keep `admin_password`, which now protects game logging and deletion as well as player management.
+
+The deployment builder versions JavaScript and CSS URLs using a hash of each file. Rebuild and upload the public folder together on every update so browsers fetch matching assets. The “Updated” time in the website indicates a player-data refresh, not a code deployment.

@@ -69,6 +69,7 @@ jobs:
           php sigma/tests/teams_test.php
       - name: Build and exercise the Sigma deployment
         run: |
+          python3 -m unittest discover -s tools -p "test_*.py"
           python3 tools/build_sigma.py sigma-deploy
           export FOOTBALL_CONFIG="$RUNNER_TEMP/football-config.php"
           export FOOTBALL_PRIVATE_DIR="$PWD/sigma-deploy/football-private"
