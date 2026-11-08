@@ -92,6 +92,12 @@ function dispatch(string $route,string $method,array $b): array {
  case 'GET /api/players':$s=row('SELECT * FROM guild_settings WHERE guild_id=?',[gid()]);if(!$s)fail('Run the private database installer first.',503);return ['players'=>allPlayerStats(),'minimumGames'=>(int)$s['minimum_win_rate_games'],'teamSize'=>(int)$s['manual_team_size'],'formsConfigured'=>false,'formsSyncFailed'=>false,'votingConfigured'=>true,'adminConfigured'=>true];
  case 'POST /api/players':http_response_code(201);return addPlayer($b,false);
  case 'POST /api/players/vote':http_response_code(201);return addPlayer($b,true);
+ case 'POST /api/players/rating':
+  $id=identifier($b['id']??null);$rating=score($b['rating']??null);
+  if(!in_array($id,array_column(activePlayers(),'id'),true))fail('Player not found.',404);
+  sql('DELETE FROM rating_polls WHERE guild_id=? AND player_id=?',[gid(),$id]);
+  sql('UPDATE players SET rating=? WHERE guild_id=? AND id=?',[$rating,gid(),$id]);
+  return playerShape(row('SELECT * FROM players WHERE guild_id=? AND id=?',[gid(),$id]));
  case 'POST /api/players/remove':$id=identifier($b['id']??null);if(!in_array($id,array_column(activePlayers(),'id'),true))fail('Player not found.',404);sql('INSERT INTO removed_players VALUES(?,?,?)',[gid(),$id,now()]);return ['ok'=>true];
  case 'GET /api/rating-polls':return ['polls'=>polls()];
  case 'POST /api/rating-polls/close':$id=(string)($b['id']??'');$poll=array_values(array_filter(polls(),fn($p)=>$p['id']===$id))[0]??null;if(!$poll)fail('Voting not found.',404);if($poll['count']<1)fail('Wait for at least one vote.');sql("UPDATE rating_polls SET status='CLOSED',updated_at=? WHERE id=?",[now(),$id]);sql('DELETE FROM rating_votes WHERE poll_id=?',[$id]);$poll['status']='CLOSED';return $poll;

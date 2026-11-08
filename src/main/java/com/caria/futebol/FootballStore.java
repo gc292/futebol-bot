@@ -169,6 +169,19 @@ final class FootballStore {
         if (!query(c,"SELECT player_id FROM removed_players WHERE guild_id=? AND player_id=?",r -> r.getLong(1),guildId,id).isEmpty())
             throw new FootballException("This player has been removed. Refresh the player list.");
     }
+    /** Set a manual score without changing the player's identity or match history. */
+    Player setPlayerRating(String guildId,long id,double rating) {
+        if (!Double.isFinite(rating) || rating<0 || rating>100)
+            throw new FootballException("Enter a score between 0 and 100.");
+        return transaction(c -> {
+            requireRosterPlayer(c,guildId,id);
+            // A manual score replaces voting, so later votes cannot overwrite it.
+            // Foreign keys also remove native voting links and individual answers.
+            execute(c,"DELETE FROM rating_polls WHERE guild_id=? AND player_id=?",guildId,id);
+            execute(c,"UPDATE players SET rating=? WHERE guild_id=? AND id=?",rating,guildId,id);
+            return player(c,guildId,id);
+        });
+    }
     Player addPlayer(String guildId, String name, double rating) {
         return addPlayer(guildId, name, rating, null);
     }

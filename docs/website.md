@@ -43,6 +43,8 @@ $env:FOOTBALL_ADMIN_PASSWORD = 'choose-your-private-password'
 
 For Docker, add the same variable to `.env` and recreate the web container. Restart the website after changing the password.
 
+In **Players**, use **Edit rating** beside a player, enter a score from 0 to 100 (decimals allowed), and confirm with the management password. The score is written to the shared database immediately and used for newly generated teams. This replaces any existing rating poll and its individual votes so it cannot overwrite the manual score. Player identity, games and statistics are preserved. Already displayed team options keep their original score snapshot; generate again to use the new score.
+
 In Players, use Remove beside a player's stats, then enter the password and confirm. Removal hides the player from the website and bot, preserves old games, and disables the old voting link. Re-adding a removed name restores the player's identity and results with a new score or voting poll.
 
 ## What works

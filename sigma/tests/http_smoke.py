@@ -74,3 +74,21 @@ for o in ranked['options']:
     assert key not in keys and o['id'] in saved;keys.add(key)
     assert len(o['teamA'])==len(o['teamB'])==5 and len(o['substitutes'])==len(ids)-10
 print('PASS: ranked alternatives API and each option saved for logging.')
+
+# Manual rating edits share the management password and preserve results.
+id=winner['id'];before=next(p for p in request(other,'/api/players')['players'] if p['id']==id)
+request(other,'/api/players/rating',{'id':id,'rating':80},403)
+request(other,'/api/players/rating',{'id':id,'rating':80,'password':'wrong'},403)
+for invalid in [-1,100.1,'',None]:request(admin,'/api/players/rating',{'id':id,'rating':invalid,'password':password},400)
+for value in [0,100,83.75]:
+    edited=request(admin,'/api/players/rating',{'id':id,'rating':value,'password':password});assert edited['id']==id and edited['rating']==value
+    current=next(p for p in request(other,'/api/players')['players'] if p['id']==id)
+    assert all(current[k]==before[k] for k in ['name','games','wins','draws','losses','points','goalDifference'])
+assert len(request(other,'/api/history')['matches'])==1
+v=request(admin,'/api/players/vote',{'name':name+' manual override','password':password},201)
+request(admin,'/api/players/rating',{'id':v['player']['id'],'rating':0,'password':password})
+assert next(p for p in request(other,'/api/players')['players'] if p['id']==v['player']['id'])['ratingReady']
+request(other,'/api/voting&id='+v['poll']['id'],status=404)
+request(admin,'/api/players/remove',{'id':v['player']['id'],'password':password})
+request(admin,'/api/players/rating',{'id':v['player']['id'],'rating':80,'password':password},404)
+print('PASS: manual rating edits, password protection, validation, vote replacement, player identity and historical statistics.')

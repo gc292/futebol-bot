@@ -11,6 +11,7 @@ function footballUrl(path) {
 const $ = id => document.getElementById(id);
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let comparisonOptions = [];
+let editRatingTarget = null, editingRating = false;
 let historyMatches = [], deleteGameTarget = null, deletingGame = false;
 let players = [], selected = new Set(), view = 'matchday', division = null, generatedIds = '', busy = false, loading = false, historyPage = 0, minimumGames = 5, teamSize = 5, votingConfigured = false, adminConfigured = false, removeTarget = null, toastTimer;
 try { const ids = JSON.parse(localStorage.getItem('football-attendance') || '[]'); if (Array.isArray(ids)) selected = new Set(ids.map(String)); } catch {}
@@ -98,7 +99,7 @@ function renderCatalogue() {
   const sort = $('catalogue-sort').value;
   const list = filtered($('catalogue-search').value, sort, sort === 'winRate');
   $('qualification').textContent = `Win rate = wins ÷ games played. Win-rate rankings require ${minimumGames} games. Team goals contribute to each player's goal difference.`;
-  $('catalogue').innerHTML = list.map(p => `<tr><td>${escapeHtml(p.name)}</td><td class="rating">${p.ratingReady === false ? 'Awaiting votes' : p.rating.toFixed(1)}</td><td>${p.games}</td><td>${p.wins} / ${p.draws} / ${p.losses}</td><td>${p.winRate == null ? '—' : p.winRate.toFixed(1)+'%'}</td><td>${p.goalDifference > 0 ? '+' : ''}${p.goalDifference}</td><td>${p.points}</td><td><button type="button" class="text-button remove-player" data-delete-player="${p.id}" aria-label="Remove ${escapeHtml(p.name)}" ${!adminConfigured ? 'disabled' : ''}>Remove</button></td></tr>`).join('');
+  $('catalogue').innerHTML = list.map(p => `<tr><td>${escapeHtml(p.name)}</td><td class="rating">${p.ratingReady === false ? 'Awaiting votes' : p.rating.toFixed(1)}</td><td>${p.games}</td><td>${p.wins} / ${p.draws} / ${p.losses}</td><td>${p.winRate == null ? '—' : p.winRate.toFixed(1)+'%'}</td><td>${p.goalDifference > 0 ? '+' : ''}${p.goalDifference}</td><td>${p.points}</td><td><button type="button" class="text-button" data-edit-rating="${p.id}" aria-label="Edit rating for ${escapeHtml(p.name)}" ${!adminConfigured ? 'disabled' : ''}>Edit rating</button> <button type="button" class="text-button remove-player" data-delete-player="${p.id}" aria-label="Remove ${escapeHtml(p.name)}" ${!adminConfigured ? 'disabled' : ''}>Remove</button></td></tr>`).join('');
   $('player-admin-note').hidden = adminConfigured;
   $('catalogue-empty').hidden = list.length > 0;
 }
@@ -195,6 +196,34 @@ $('catalogue').addEventListener('click', e => {
   $('remove-password').value = ''; $('remove-error').textContent = ''; $('remove-submit').disabled = false;
   $('remove-dialog').showModal(); $('remove-password').focus();
 });
+$('catalogue').addEventListener('click', e => {
+  const button = e.target.closest('[data-edit-rating]');
+  if (!button || button.disabled || editingRating) return;
+  editRatingTarget = players.find(p => p.id === button.dataset.editRating);
+  if (!editRatingTarget) return;
+  $('edit-rating-form').reset(); $('edit-rating-error').textContent = '';
+  $('edit-rating-title').textContent = `Edit ${editRatingTarget.name}'s rating`;
+  $('edit-rating-score').value = editRatingTarget.rating;
+  $('edit-rating-dialog').showModal(); $('edit-rating-score').focus();
+});
+$('edit-rating-close').onclick = () => { if (!editingRating) $('edit-rating-dialog').close(); };
+$('edit-rating-dialog').addEventListener('cancel', e => { if (editingRating) e.preventDefault(); });
+$('edit-rating-dialog').addEventListener('close', () => { $('edit-rating-password').value = ''; });
+$('edit-rating-form').onsubmit = async e => {
+  e.preventDefault(); if (editingRating || !editRatingTarget) return;
+  const rating = Number($('edit-rating-score').value);
+  $('edit-rating-error').textContent = '';
+  if ($('edit-rating-score').value.trim() === '' || !Number.isFinite(rating) || rating<0 || rating>100) {
+    $('edit-rating-error').textContent = 'Enter a score between 0 and 100.'; return;
+  }
+  editingRating = true; $('edit-rating-submit').disabled = true;
+  try {
+    await api('/api/players/rating', {id:editRatingTarget.id,rating,password:$('edit-rating-password').value});
+    $('edit-rating-dialog').close(); await refresh();
+    toast('Rating saved. Make the teams again to use the updated score.');
+  } catch(e) { $('edit-rating-error').textContent = e.message; }
+  finally { editingRating = false; $('edit-rating-submit').disabled = false; $('edit-rating-password').value = ''; }
+};
 $('remove-close').onclick = () => $('remove-dialog').close();
 $('remove-dialog').addEventListener('close', () => { $('remove-password').value = ''; });
 $('remove-form').onsubmit = async e => {
@@ -223,7 +252,7 @@ $('copy').onclick = async () => {
   } catch { toast('Copy is unavailable in this browser. Select and copy the teams on screen.'); }
 };
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-setInterval(() => { if (!document.hidden && !$('add-dialog').open && !$('remove-dialog').open && !$('game-dialog').open && !$('rating-dialog').open && !$('finish-vote-dialog').open) refresh(); }, 15000);
+setInterval(() => { if (!document.hidden && !$('add-dialog').open && !$('remove-dialog').open && !$('edit-rating-dialog').open && !$('game-dialog').open && !$('rating-dialog').open && !$('finish-vote-dialog').open) refresh(); }, 15000);
 refresh();
 let gameDivisions = [], manualTeams = new Map(), resultDraft = null, savingGame = false;
 function localDateValue(date = new Date()) { return new Date(date.getTime() - date.getTimezoneOffset()*60000).toISOString().slice(0,16); }

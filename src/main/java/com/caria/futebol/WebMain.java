@@ -144,6 +144,12 @@ public final class WebMain {
                     if (!requireAdmin(x,b)) return;
                     reply(x, 201, player(store.addPlayer(guild, b.get("name").getAsString(), b.get("rating").getAsDouble()))); return;
                 }
+                if (path.equals("/api/players/rating") && post) {
+                    JsonObject b=body(x); if (!requireAdmin(x,b)) return;
+                    if (!b.has("id") || !b.get("id").isJsonPrimitive() || !b.has("rating") || !b.get("rating").isJsonPrimitive() || !b.getAsJsonPrimitive("rating").isNumber())
+                        throw new FootballException("Choose a player and enter a score between 0 and 100.");
+                    reply(x,200,player(store.setPlayerRating(guild,b.get("id").getAsBigDecimal().longValueExact(),b.get("rating").getAsDouble()))); return;
+                }
                 if (path.equals("/api/players/remove") && post) {
                     JsonObject b = body(x); if (!requireAdmin(x,b)) return;
                     store.removePlayer(guild,b.get("id").getAsBigDecimal().longValueExact());
