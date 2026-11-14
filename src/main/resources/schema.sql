@@ -136,3 +136,10 @@ CREATE TABLE IF NOT EXISTS player_rating_overrides (
     FOREIGN KEY (guild_id,player_id) REFERENCES players(guild_id,id)
 );
 CREATE INDEX IF NOT EXISTS rating_override_chronology ON player_rating_overrides(guild_id,effective_at,id);
+
+CREATE TABLE IF NOT EXISTS match_rating_scope (
+    guild_id TEXT PRIMARY KEY,
+    historical_max_id BIGINT NOT NULL,
+    historical_match_id BIGINT,
+    FOREIGN KEY (guild_id) REFERENCES guild_settings(guild_id)
+);

@@ -34,6 +34,13 @@ function seedRatingBaselines(): bool {
  $s->execute([gid()]);
  return $s->rowCount()>0;
 }
+function initializeRatingScope(): void {
+ if(row('SELECT guild_id FROM match_rating_scope WHERE guild_id=?',[gid()]))return;
+ $latest=row('SELECT id FROM matches WHERE guild_id=? ORDER BY played_at DESC,id DESC LIMIT 1',[gid()]);
+ $ceiling=row('SELECT COALESCE(MAX(id),0) AS max_id FROM matches WHERE guild_id=?',[gid()]);
+ sql('INSERT INTO match_rating_scope(guild_id,historical_max_id,historical_match_id) VALUES(?,?,?)',[gid(),$ceiling['max_id'],$latest['id']??null]);
+ replayMatchRatings();
+}
 function replayMatchRatings(): void {
  seedRatingBaselines();
  $ratings=[];
@@ -41,7 +48,7 @@ function replayMatchRatings(): void {
   $ratings[$p['player_id']]=(float)$p['rating'];
  $overrides=rows('SELECT player_id,rating,effective_at FROM player_rating_overrides WHERE guild_id=? ORDER BY effective_at,id',[gid()]);
  $next=0;
- foreach(rows('SELECT division_id,goals_a,goals_b,played_at FROM matches WHERE guild_id=? ORDER BY played_at,id',[gid()]) as $game){
+ foreach(rows('SELECT m.division_id,m.goals_a,m.goals_b,m.played_at FROM matches m JOIN match_rating_scope s ON s.guild_id=m.guild_id WHERE m.guild_id=? AND (m.id=s.historical_match_id OR m.id>s.historical_max_id) ORDER BY m.played_at,m.id',[gid()]) as $game){
   while(isset($overrides[$next])&&strcmp($overrides[$next]['effective_at'],$game['played_at'])<=0){
    $edit=$overrides[$next++];$ratings[$edit['player_id']]=(float)$edit['rating'];
   }

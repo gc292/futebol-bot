@@ -149,7 +149,7 @@ final class FootballStore {
                         ON CONFLICT(guild_id,name) DO NOTHING
                         """, guildId, name, PlayerCatalog.rankOf(name), i);
             }
-            if (seedRatingBaselines(c,guildId)>0) replayRatings(c,guildId);
+            initializeRatingScope(c,guildId);
             return null;
         });
     }
@@ -182,6 +182,16 @@ final class FootballStore {
                 """,guildId);
     }
 
+    private static void initializeRatingScope(Connection c,String guildId) throws SQLException {
+        int inserted=execute(c,"""
+                INSERT INTO match_rating_scope(guild_id,historical_max_id,historical_match_id)
+                SELECT ?,COALESCE((SELECT MAX(id) FROM matches WHERE guild_id=?),0),
+                    (SELECT id FROM matches WHERE guild_id=? ORDER BY played_at DESC,id DESC LIMIT 1)
+                WHERE NOT EXISTS (SELECT 1 FROM match_rating_scope WHERE guild_id=?)
+                """,guildId,guildId,guildId,guildId);
+        if (inserted>0) replayRatings(c,guildId);
+    }
+
     private static void overrideRating(Connection c,String guildId,long playerId,double rating) throws SQLException {
         seedRatingBaselines(c,guildId);
         execute(c,"INSERT INTO player_rating_overrides(guild_id,player_id,rating,effective_at) VALUES(?,?,?,?)",
@@ -197,7 +207,7 @@ final class FootballStore {
         },guildId);
         var overrides=query(c,"SELECT player_id,rating,effective_at FROM player_rating_overrides WHERE guild_id=? ORDER BY effective_at,id",
                 r -> new RatingOverride(r.getLong(1),r.getDouble(2),r.getString(3)),guildId);
-        var games=query(c,"SELECT division_id,goals_a,goals_b,played_at FROM matches WHERE guild_id=? ORDER BY played_at,id",
+        var games=query(c,"SELECT m.division_id,m.goals_a,m.goals_b,m.played_at FROM matches m JOIN match_rating_scope s ON s.guild_id=m.guild_id WHERE m.guild_id=? AND (m.id=s.historical_match_id OR m.id>s.historical_max_id) ORDER BY m.played_at,m.id",
                 r -> new RatedMatch(r.getLong(1),r.getInt(2),r.getInt(3),r.getString(4)),guildId);
         int next=0;
         for (var game:games) {
@@ -596,6 +606,7 @@ final class FootballStore {
             if (!draft.action().equals("CREATE") && !authorizedToModify) throw new FootballException("You are not authorized to edit or delete matches.");
             if (draft.status().equals("CONFIRMED")) throw new FootballException("This operation has already been confirmed.");
             if (!draft.status().equals("READY")) throw new FootballException("Submit a score and review it before confirming.");
+            initializeRatingScope(c,guildId);
             long matchId;
             if (draft.action().equals("CREATE")) {
                 if (divisionHasMatch(c, draft.divisionId())) throw new FootballException("This division already has a recorded match.");
@@ -636,6 +647,7 @@ final class FootballStore {
         transaction(c -> {
             Match match=match(c,guildId,id);
             if (match.version()!=expectedVersion) throw new FootballException("This game changed. Refresh and review it before deleting.");
+            initializeRatingScope(c,guildId);
             execute(c,"DELETE FROM matches WHERE guild_id=? AND id=? AND version=?",guildId,id,expectedVersion);
             execute(c,"UPDATE drafts SET status='CANCELLED',revision=revision+1 WHERE guild_id=? AND confirmed_match_id=? AND action='CREATE' AND status='CONFIRMED'",guildId,id);
             replayRatings(c,guildId);

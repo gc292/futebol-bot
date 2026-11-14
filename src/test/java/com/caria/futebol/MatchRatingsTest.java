@@ -51,25 +51,40 @@ class MatchRatingsTest {
         assertEquals(one,two);
     }
 
-    @Test void existingGamesReplayOnceAndDeletionKeepsManualOverride() throws Exception {
+    @Test void migrationReplacesFullReplayWithLatestPlayedGameAndKeepsManualOverride() throws Exception {
         Path db=dir.resolve("legacy.db");
         var store=new FootballStore(db);
         store.ensureGuild("guild");
         var p=store.players("guild");
         var div=store.saveGeneratedDivision("guild","website","website",p.subList(0,5).stream().map(Player::name).toList(),
                 p.subList(5,10).stream().map(Player::name).toList(),"TEAMS");
-        // Simulate a database from before the rating migration.
+        var earlier=store.saveGeneratedDivision("guild","website","website",p.subList(0,5).stream().map(Player::name).toList(),
+                p.subList(5,10).stream().map(Player::name).toList(),"TEAMS");
+        // Simulate already-adjusted scores with the original saved baseline.
         try(var c=DriverManager.getConnection("jdbc:sqlite:"+db);var statement=c.createStatement()){
-            statement.executeUpdate("DELETE FROM player_rating_baselines");
-            statement.executeUpdate("UPDATE players SET rating=50");
+            statement.executeUpdate("DELETE FROM match_rating_scope");
+            statement.executeUpdate("UPDATE player_rating_baselines SET rating=50");
+            statement.executeUpdate("UPDATE players SET rating=99");
             statement.executeUpdate("INSERT INTO matches(guild_id,division_id,goals_a,goals_b,played_at,recorded_at,recorded_by)"
                     +" VALUES('guild',"+div.id()+",1,0,'2025-01-01T20:00:00.000000000Z','2025-01-01T20:00:00.000000000Z','website')");
+            // Higher ID but earlier playing date: this must not count.
+            statement.executeUpdate("INSERT INTO matches(guild_id,division_id,goals_a,goals_b,played_at,recorded_at,recorded_by)"
+                    +" VALUES('guild',"+earlier.id()+",0,4,'2024-01-01T20:00:00.000000000Z','2025-02-01T20:00:00.000000000Z','website')");
         }
         store=new FootballStore(db);
         store.ensureGuild("guild");
         assertEquals(51.5,store.player("guild",p.get(0).id()).rating());
         assertEquals(48.5,store.player("guild",p.get(5).id()).rating());
         store.ensureGuild("guild");
+        assertEquals(51.5,store.player("guild",p.get(0).id()).rating());
+        assertEquals(2,store.matches("guild",null,0,10).size());
+        var future=store.saveGeneratedDivision("guild","website","website",p.subList(0,5).stream().map(Player::name).toList(),
+                p.subList(5,10).stream().map(Player::name).toList(),"TEAMS");
+        var draft=store.beginGenerated("guild","website","website",future.id());
+        draft=store.score("guild","website",draft.id(),1,0,Instant.now().minusSeconds(60),draft.revision());
+        long futureId=store.confirm("guild","website",draft.id(),draft.revision(),false);
+        assertEquals(51.5+3*(1-MatchRatings.expected(51.5,48.5)),store.player("guild",p.get(0).id()).rating(),1e-12);
+        store.deleteMatch("guild",futureId,1);
         assertEquals(51.5,store.player("guild",p.get(0).id()).rating());
         store.setPlayerRating("guild",p.get(0).id(),76.25);
         var match=store.matches("guild",null,0,10).get(0);

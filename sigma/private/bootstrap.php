@@ -79,7 +79,7 @@ function serve(): void {
   }
   if($post&&in_array($route,['/api/players','/api/players/vote','/api/players/remove','/api/players/rating','/api/rating-polls/close','/api/results/review','/api/results/confirm','/api/results/delete'],true)) checkPassword('admin',(string)($body['password']??''),$c['admin_password']);
   $result=transaction(function()use($route,$method,$body){
-   if(seedRatingBaselines())replayMatchRatings();
+   if(row('SELECT guild_id FROM guild_settings WHERE guild_id=?',[gid()]))initializeRatingScope();
    return dispatch($route,$method,$body);
   });
   echo json_encode($result,JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
