@@ -72,3 +72,7 @@ Log games directly in **Games → Log a game**: choose a saved lineup or assign 
 For the university hosting deployment, use [sigma.md](sigma.md). It provides a PHP API for the shared frontend and MariaDB storage, with SQLite migration and Java bot synchronization. The local Java/SQLite instructions above remain available for testing on Windows.
 
 In Games, use Delete on a result, review the game and enter the management password. Deletion immediately recalculates statistics and keeps the saved teams available. If a game changed since the page loaded, refresh and review it again before deletion.
+
+### Match-based player ratings
+
+Confirmed games update scores on the 0–100 scale. The system compares the two pre-game team averages, gives more weight to unexpected results, and takes the winning margin into account with diminishing returns. Each player moves at most three points per game. Draws can move ratings if the teams were uneven. The first upgrade replays saved games from the ratings stored at upgrade time; older starting ratings were not recorded. Match corrections and deletions rebuild ratings in playing-date order while honoring subsequent manual scores and vote averages.

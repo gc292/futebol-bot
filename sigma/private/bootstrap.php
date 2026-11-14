@@ -78,10 +78,14 @@ function serve(): void {
    if($origin!==null) { $expected=(($c['secure_cookies']??true)?'https':'http').'://'.($_SERVER['HTTP_HOST']??'');if(!hash_equals($expected,$origin))fail('Invalid request origin.',403); }
   }
   if($post&&in_array($route,['/api/players','/api/players/vote','/api/players/remove','/api/players/rating','/api/rating-polls/close','/api/results/review','/api/results/confirm','/api/results/delete'],true)) checkPassword('admin',(string)($body['password']??''),$c['admin_password']);
-  $result=transaction(fn()=>dispatch($route,$method,$body));
+  $result=transaction(function()use($route,$method,$body){
+   if(seedRatingBaselines())replayMatchRatings();
+   return dispatch($route,$method,$body);
+  });
   echo json_encode($result,JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
  } catch(ApiError $e){http_response_code($e->status);echo json_encode(['error'=>$e->getMessage()]);}
  catch(Throwable $e){error_log('Football: '.$e->getMessage());http_response_code(500);echo json_encode(['error'=>'The server could not complete this request. Check the private server error log.']);}
 }
 require __DIR__.'/teams.php';
+require __DIR__.'/match_ratings.php';
 require __DIR__.'/app.php';

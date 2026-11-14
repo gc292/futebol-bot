@@ -7,6 +7,8 @@ source=sqlite3.connect(a.database.resolve().as_uri()+'?mode=ro',uri=True)
 snapshot=sqlite3.connect(':memory:');source.backup(snapshot);source.close();snapshot.row_factory=sqlite3.Row
 existing={r[0] for r in snapshot.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 if not {'guild_settings','players','matches'}.issubset(existing): raise SystemExit('This is not a football database.')
+if {'player_rating_baselines','player_rating_overrides'} <= existing:
+    TABLES += ['player_rating_baselines','player_rating_overrides']
 result={'schemaVersion':1,'tables':{t:[dict(r) for r in snapshot.execute('SELECT * FROM '+t)] if t in existing else [] for t in TABLES}}
 # Refuse to overwrite an earlier export by mistake.
 with a.output.open('x',encoding='utf-8') as f: json.dump(result,f,ensure_ascii=False,allow_nan=False)

@@ -38,7 +38,18 @@ request(admin,'/api/teams',{'playerIds':ids[:9]},400)
 t=request(admin,'/api/teams',{'playerIds':ids});assert len(t['teamA'])==len(t['teamB'])==5 and len(t['substitutes'])==2
 review=request(admin,'/api/results/review',{'divisionId':t['id'],'goalsA':'3','goalsB':'1','playedAt':'2026-10-11T12:00:00.000Z'})
 match=request(admin,'/api/results/confirm',{'draftId':review['draftId'],'revision':review['revision']})
+def ratings():
+    return {p['id']:p['rating'] for p in request(other,'/api/players')['players']}
+before_retry=ratings()
+avg_a=sum(p['rating'] for p in t['teamA'])/len(t['teamA'])
+avg_b=sum(p['rating'] for p in t['teamB'])/len(t['teamB'])
+from math import exp, isclose
+delta=min(3,3*(1-1/(1+10**((avg_b-avg_a)/20)))*(1+0.8*(1-exp(-0.5))))
+for side,sign in [('teamA',1),('teamB',-1)]:
+    for p in t[side]:
+        assert isclose(before_retry[p['id']],max(0,min(100,p['rating']+sign*delta)),abs_tol=1e-10)
 assert request(admin,'/api/results/confirm',{'draftId':review['draftId'],'revision':review['revision']})==match
+assert ratings()==before_retry
 request(admin,'/api/results/review',{'divisionId':t['id'],'goalsA':3,'goalsB':1,'playedAt':'2026-10-11T12:00:00Z'},400)
 manual={'teamA':[p['id'] for p in t['teamA']],'teamB':[p['id'] for p in t['teamB']],'goalsA':3,'goalsB':1,'playedAt':'2026-10-11T12:00:00Z'}
 r=request(admin,'/api/results/review',manual);request(admin,'/api/results/confirm',{'draftId':r['draftId'],'revision':r['revision']},400)

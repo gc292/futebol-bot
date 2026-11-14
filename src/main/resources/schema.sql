@@ -118,3 +118,21 @@ CREATE TABLE IF NOT EXISTS rating_votes (
     PRIMARY KEY(poll_id,voter_id)
 );
 PRAGMA user_version = 1;
+
+CREATE TABLE IF NOT EXISTS player_rating_baselines (
+    guild_id TEXT NOT NULL,
+    player_id INTEGER NOT NULL,
+    rating DOUBLE NOT NULL,
+    PRIMARY KEY(guild_id,player_id),
+    FOREIGN KEY (guild_id,player_id) REFERENCES players(guild_id,id)
+);
+
+CREATE TABLE IF NOT EXISTS player_rating_overrides (
+    id INTEGER PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    player_id INTEGER NOT NULL,
+    rating DOUBLE NOT NULL,
+    effective_at TEXT NOT NULL,
+    FOREIGN KEY (guild_id,player_id) REFERENCES players(guild_id,id)
+);
+CREATE INDEX IF NOT EXISTS rating_override_chronology ON player_rating_overrides(guild_id,effective_at,id);

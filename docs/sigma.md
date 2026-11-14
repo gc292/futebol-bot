@@ -116,3 +116,9 @@ A 500 response contains no database credentials; detailed errors go to the hosti
 Rebuild with `py tools/build_sigma.py sigma-deploy`, then upload `sigma-deploy/football-private` to your home directory and `sigma-deploy/web/futebol` to `~/web/` as above. Your private `config.php` is not overwritten. Reload the website with Ctrl+F5. There is no database migration for public browsing or game deletion. An old `web_key` entry may be removed from config.php; it is ignored. Keep `admin_password`, which now protects game logging and deletion as well as player management.
 
 The deployment builder versions JavaScript and CSS URLs using a hash of each file. Rebuild and upload the public folder together on every update so browsers fetch matching assets. The “Updated” time in the website indicates a player-data refresh, not a code deployment.
+
+## Enable match-based ratings on an existing database
+
+Back up MariaDB, upload the new deployment folders, then run `php ~/football-private/install.php` over SSH. Do not pass `--import` for this upgrade. The installer captures the existing ratings as starting scores and replays all saved games in playing-date order (game ID breaks ties). Running it again will not apply the changes twice. The Java backend creates these same tables and performs the initial replay when it initializes the guild. Update any Java server or Discord bot sharing the database before using it again so that all writers maintain ratings.
+
+Confirmed results update ratings in the same transaction as the game. Corrections, backdated results and deletions replay the history. Manual scores and vote averages recorded after the upgrade take effect at the time they are saved.

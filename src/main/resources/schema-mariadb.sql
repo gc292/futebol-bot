@@ -156,3 +156,21 @@ CREATE TABLE IF NOT EXISTS web_password_attempts (
  expires_at BIGINT NOT NULL,
  INDEX web_attempts_expiry(expires_at)
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS player_rating_baselines (
+    guild_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    player_id BIGINT NOT NULL,
+    rating DOUBLE NOT NULL,
+    PRIMARY KEY(guild_id,player_id),
+    FOREIGN KEY (guild_id,player_id) REFERENCES players(guild_id,id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS player_rating_overrides (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    guild_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    player_id BIGINT NOT NULL,
+    rating DOUBLE NOT NULL,
+    effective_at VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    FOREIGN KEY (guild_id,player_id) REFERENCES players(guild_id,id)
+) ENGINE=InnoDB;
+CREATE INDEX IF NOT EXISTS rating_override_chronology ON player_rating_overrides(guild_id,effective_at,id);

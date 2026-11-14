@@ -10,6 +10,8 @@ try {
  if(($argv[1]??'')==='--import'){
   if(!isset($argv[2]))throw new RuntimeException('Usage: php install.php --import /private/path/export.json');
   $data=json_decode(file_get_contents($argv[2]),true,512,JSON_THROW_ON_ERROR);
+  $withRatings=array_merge($tables,['player_rating_baselines','player_rating_overrides']);
+  if(array_keys($data['tables']??[])===$withRatings)$tables=$withRatings;
   if(($data['schemaVersion']??null)!==1||array_keys($data['tables']??[])!==$tables)throw new RuntimeException('Unsupported SQLite export.');
   transaction(function()use($tables,$data){
    foreach($tables as $table)if((int)row("SELECT COUNT(*) AS n FROM $table")['n']!==0)throw new RuntimeException('Import requires empty application tables. No data was changed.');
@@ -30,4 +32,6 @@ try {
    foreach($catalogue as $name=>$rating)sql('INSERT INTO players(guild_id,name,rating,roster_order) VALUES(?,?,?,?)',[gid(),$name,$rating,$order++]);
   });echo "Schema ready. Existing data retained.\n";
  }else throw new RuntimeException('Usage: php install.php [--import /private/path/export.json]');
+ transaction(fn()=>replayMatchRatings());
+ echo "Match ratings replayed from stored starting scores.\n";
 } catch(Throwable $e){fwrite(STDERR,'Install failed: '.$e->getMessage()."\n");exit(1);}
