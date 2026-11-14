@@ -183,13 +183,13 @@ final class FootballStore {
     }
 
     private static void initializeRatingScope(Connection c,String guildId) throws SQLException {
-        int inserted=execute(c,"""
-                INSERT INTO match_rating_scope(guild_id,historical_max_id,historical_match_id)
-                SELECT ?,COALESCE((SELECT MAX(id) FROM matches WHERE guild_id=?),0),
-                    (SELECT id FROM matches WHERE guild_id=? ORDER BY played_at DESC,id DESC LIMIT 1)
-                WHERE NOT EXISTS (SELECT 1 FROM match_rating_scope WHERE guild_id=?)
-                """,guildId,guildId,guildId,guildId);
-        if (inserted>0) replayRatings(c,guildId);
+        // Zero in the legacy historical-match slot marks a completed new-games-only cutover.
+        if (!query(c,"SELECT guild_id FROM match_rating_scope WHERE guild_id=? AND historical_match_id=0",
+                r -> r.getString(1),guildId).isEmpty()) return;
+        long cutoff=one(c,"SELECT COALESCE(MAX(id),0) FROM matches WHERE guild_id=?",r -> r.getLong(1),guildId);
+        execute(c,"INSERT OR IGNORE INTO match_rating_scope(guild_id,historical_max_id,historical_match_id) VALUES(?,?,0)",guildId,cutoff);
+        execute(c,"UPDATE match_rating_scope SET historical_max_id=?,historical_match_id=0 WHERE guild_id=?",cutoff,guildId);
+        replayRatings(c,guildId);
     }
 
     private static void overrideRating(Connection c,String guildId,long playerId,double rating) throws SQLException {
@@ -207,7 +207,7 @@ final class FootballStore {
         },guildId);
         var overrides=query(c,"SELECT player_id,rating,effective_at FROM player_rating_overrides WHERE guild_id=? ORDER BY effective_at,id",
                 r -> new RatingOverride(r.getLong(1),r.getDouble(2),r.getString(3)),guildId);
-        var games=query(c,"SELECT m.division_id,m.goals_a,m.goals_b,m.played_at FROM matches m JOIN match_rating_scope s ON s.guild_id=m.guild_id WHERE m.guild_id=? AND (m.id=s.historical_match_id OR m.id>s.historical_max_id) ORDER BY m.played_at,m.id",
+        var games=query(c,"SELECT m.division_id,m.goals_a,m.goals_b,m.played_at FROM matches m JOIN match_rating_scope s ON s.guild_id=m.guild_id WHERE m.guild_id=? AND m.id>s.historical_max_id ORDER BY m.played_at,m.id",
                 r -> new RatedMatch(r.getLong(1),r.getInt(2),r.getInt(3),r.getString(4)),guildId);
         int next=0;
         for (var game:games) {

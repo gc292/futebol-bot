@@ -70,6 +70,14 @@ request(admin,'/api/results/delete',{'id':logged['id'],'version':logged['version
 assert len(request(other,'/api/history')['matches'])==2
 request(admin,'/api/results/delete',{'id':logged['id'],'version':logged['version']})
 assert len(request(other,'/api/history')['matches'])==1
+# The remaining draw between the original teams is now evaluated from their
+# starting ratings, with the later restored player's manual score preserved.
+draw_delta=3*(0.5-1/(1+10**((avg_b-avg_a)/20)))
+after_delete=ratings()
+for side,sign in [('teamA',1),('teamB',-1)]:
+    for p in t[side]:
+        expected=75 if p['id']==winner['id'] else max(0,min(100,p['rating']+sign*draw_delta))
+        assert isclose(after_delete[p['id']],expected,abs_tol=1e-10)
 stats=next(x for x in request(other,'/api/players')['players'] if x['id']==winner['id']);assert (stats['games'],stats['wins'],stats['points'],stats['goalDifference'])==(1,0,1,0)
 request(admin,'/api/results/confirm',{'draftId':review['draftId'],'revision':review['revision']},400)
 print('PASS: public browsing, protected logging/deletion, stale deletion and statistics recalculation, fixed scores, anonymous editable votes, cleanup, teams, generated/manual results, duplicate protection, statistics, archive/restore and nested URLs.')

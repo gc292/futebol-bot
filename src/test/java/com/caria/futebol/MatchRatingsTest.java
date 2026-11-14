@@ -51,7 +51,7 @@ class MatchRatingsTest {
         assertEquals(one,two);
     }
 
-    @Test void migrationReplacesFullReplayWithLatestPlayedGameAndKeepsManualOverride() throws Exception {
+    @Test void migrationRestoresBaselineThenOnlyNewGamesCount() throws Exception {
         Path db=dir.resolve("legacy.db");
         var store=new FootballStore(db);
         store.ensureGuild("guild");
@@ -62,7 +62,7 @@ class MatchRatingsTest {
                 p.subList(5,10).stream().map(Player::name).toList(),"TEAMS");
         // Simulate already-adjusted scores with the original saved baseline.
         try(var c=DriverManager.getConnection("jdbc:sqlite:"+db);var statement=c.createStatement()){
-            statement.executeUpdate("DELETE FROM match_rating_scope");
+            statement.executeUpdate("UPDATE match_rating_scope SET historical_max_id=1,historical_match_id=1");
             statement.executeUpdate("UPDATE player_rating_baselines SET rating=50");
             statement.executeUpdate("UPDATE players SET rating=99");
             statement.executeUpdate("INSERT INTO matches(guild_id,division_id,goals_a,goals_b,played_at,recorded_at,recorded_by)"
@@ -73,19 +73,22 @@ class MatchRatingsTest {
         }
         store=new FootballStore(db);
         store.ensureGuild("guild");
-        assertEquals(51.5,store.player("guild",p.get(0).id()).rating());
-        assertEquals(48.5,store.player("guild",p.get(5).id()).rating());
+        assertEquals(50,store.player("guild",p.get(0).id()).rating());
+        assertEquals(50,store.player("guild",p.get(5).id()).rating());
         store.ensureGuild("guild");
-        assertEquals(51.5,store.player("guild",p.get(0).id()).rating());
+        assertEquals(50,store.player("guild",p.get(0).id()).rating());
         assertEquals(2,store.matches("guild",null,0,10).size());
         var future=store.saveGeneratedDivision("guild","website","website",p.subList(0,5).stream().map(Player::name).toList(),
                 p.subList(5,10).stream().map(Player::name).toList(),"TEAMS");
         var draft=store.beginGenerated("guild","website","website",future.id());
         draft=store.score("guild","website",draft.id(),1,0,Instant.now().minusSeconds(60),draft.revision());
         long futureId=store.confirm("guild","website",draft.id(),draft.revision(),false);
-        assertEquals(51.5+3*(1-MatchRatings.expected(51.5,48.5)),store.player("guild",p.get(0).id()).rating(),1e-12);
-        store.deleteMatch("guild",futureId,1);
         assertEquals(51.5,store.player("guild",p.get(0).id()).rating());
+        assertEquals(48.5,store.player("guild",p.get(5).id()).rating());
+        store.ensureGuild("guild");
+        assertEquals(51.5,store.player("guild",p.get(0).id()).rating());
+        store.deleteMatch("guild",futureId,1);
+        assertEquals(50,store.player("guild",p.get(0).id()).rating());
         store.setPlayerRating("guild",p.get(0).id(),76.25);
         var match=store.matches("guild",null,0,10).get(0);
         store.deleteMatch("guild",match.id(),match.version());
