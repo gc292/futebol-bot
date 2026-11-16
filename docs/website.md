@@ -73,6 +73,6 @@ For the university hosting deployment, use [sigma.md](sigma.md). It provides a P
 
 In Games, use Delete on a result, review the game and enter the management password. Deletion immediately recalculates statistics and keeps the saved teams available. If a game changed since the page loaded, refresh and review it again before deletion.
 
-### Match-based player ratings
+### Player ratings and match results
 
-Confirmed games update scores on the 0–100 scale. The system compares the two pre-game team averages, gives more weight to unexpected results, and takes the winning margin into account with diminishing returns. Each player moves at most three points per game. Draws can move ratings if the teams were uneven. The upgrade removes all previous match adjustments, while retaining manual scores and vote averages. Games already logged at the cutover stay in match history and statistics. Only newly logged games affect ratings, even if you enter an earlier playing date. Corrections and deletions recalculate ratings using eligible games and preserve manual scores and vote averages.
+Logging, correcting or deleting a game updates match statistics without changing player ratings. Ratings can be set manually or through the existing player voting flow. Upgrading leaves currently stored ratings intact.

@@ -149,7 +149,6 @@ final class FootballStore {
                         ON CONFLICT(guild_id,name) DO NOTHING
                         """, guildId, name, PlayerCatalog.rankOf(name), i);
             }
-            initializeRatingScope(c,guildId);
             return null;
         });
     }
@@ -170,60 +169,6 @@ final class FootballStore {
         if (!query(c,"SELECT player_id FROM removed_players WHERE guild_id=? AND player_id=?",r -> r.getLong(1),guildId,id).isEmpty())
             throw new FootballException("This player has been removed. Refresh the player list.");
     }
-    private record RatingOverride(long playerId, double rating, String at) {}
-    private record RatedMatch(long divisionId, int a, int b, String at) {}
-
-    private static int seedRatingBaselines(Connection c,String guildId) throws SQLException {
-        return execute(c, """
-                INSERT INTO player_rating_baselines(guild_id,player_id,rating)
-                SELECT p.guild_id,p.id,p.rating FROM players p
-                LEFT JOIN player_rating_baselines b ON b.guild_id=p.guild_id AND b.player_id=p.id
-                WHERE p.guild_id=? AND b.player_id IS NULL
-                """,guildId);
-    }
-
-    private static void initializeRatingScope(Connection c,String guildId) throws SQLException {
-        // Zero in the legacy historical-match slot marks a completed new-games-only cutover.
-        if (!query(c,"SELECT guild_id FROM match_rating_scope WHERE guild_id=? AND historical_match_id=0",
-                r -> r.getString(1),guildId).isEmpty()) return;
-        long cutoff=one(c,"SELECT COALESCE(MAX(id),0) FROM matches WHERE guild_id=?",r -> r.getLong(1),guildId);
-        execute(c,"INSERT OR IGNORE INTO match_rating_scope(guild_id,historical_max_id,historical_match_id) VALUES(?,?,0)",guildId,cutoff);
-        execute(c,"UPDATE match_rating_scope SET historical_max_id=?,historical_match_id=0 WHERE guild_id=?",cutoff,guildId);
-        replayRatings(c,guildId);
-    }
-
-    private static void overrideRating(Connection c,String guildId,long playerId,double rating) throws SQLException {
-        seedRatingBaselines(c,guildId);
-        execute(c,"INSERT INTO player_rating_overrides(guild_id,player_id,rating,effective_at) VALUES(?,?,?,?)",
-                guildId,playerId,rating,timestamp(Instant.now()));
-        replayRatings(c,guildId);
-    }
-
-    private static void replayRatings(Connection c,String guildId) throws SQLException {
-        seedRatingBaselines(c,guildId);
-        Map<Long,Double> ratings=new HashMap<>();
-        query(c,"SELECT player_id,rating FROM player_rating_baselines WHERE guild_id=?",r -> {
-            ratings.put(r.getLong(1),r.getDouble(2));return true;
-        },guildId);
-        var overrides=query(c,"SELECT player_id,rating,effective_at FROM player_rating_overrides WHERE guild_id=? ORDER BY effective_at,id",
-                r -> new RatingOverride(r.getLong(1),r.getDouble(2),r.getString(3)),guildId);
-        var games=query(c,"SELECT m.division_id,m.goals_a,m.goals_b,m.played_at FROM matches m JOIN match_rating_scope s ON s.guild_id=m.guild_id WHERE m.guild_id=? AND m.id>s.historical_max_id ORDER BY m.played_at,m.id",
-                r -> new RatedMatch(r.getLong(1),r.getInt(2),r.getInt(3),r.getString(4)),guildId);
-        int next=0;
-        for (var game:games) {
-            while (next<overrides.size() && overrides.get(next).at().compareTo(game.at())<=0) {
-                var override=overrides.get(next++); ratings.put(override.playerId(),override.rating());
-            }
-            var a=query(c,"SELECT player_id FROM division_players WHERE guild_id=? AND division_id=? AND team='A'",r -> r.getLong(1),guildId,game.divisionId());
-            var b=query(c,"SELECT player_id FROM division_players WHERE guild_id=? AND division_id=? AND team='B'",r -> r.getLong(1),guildId,game.divisionId());
-            MatchRatings.apply(ratings,a,b,game.a(),game.b());
-        }
-        while (next<overrides.size()) {
-            var override=overrides.get(next++); ratings.put(override.playerId(),override.rating());
-        }
-        for (var entry:ratings.entrySet())
-            execute(c,"UPDATE players SET rating=? WHERE guild_id=? AND id=? AND rating<>?",entry.getValue(),guildId,entry.getKey(),entry.getValue());
-    }
     /** Set a manual score without changing the player's identity or match history. */
     Player setPlayerRating(String guildId,long id,double rating) {
         if (!Double.isFinite(rating) || rating<0 || rating>100)
@@ -233,7 +178,7 @@ final class FootballStore {
             // A manual score replaces voting, so later votes cannot overwrite it.
             // Foreign keys also remove native voting links and individual answers.
             execute(c,"DELETE FROM rating_polls WHERE guild_id=? AND player_id=?",guildId,id);
-            overrideRating(c,guildId,id,rating);
+            execute(c,"UPDATE players SET rating=? WHERE guild_id=? AND id=?",rating,guildId,id);
             return player(c,guildId,id);
         });
     }
@@ -262,12 +207,11 @@ final class FootballStore {
                     throw new FootballException("A player with that name already exists.");
                 // Reuse the historical identity, but start a new rating vote when re-added.
                 execute(c,"DELETE FROM rating_polls WHERE guild_id=? AND player_id=?",guildId,playerId);
-                overrideRating(c,guildId,playerId,rating);
+                execute(c,"UPDATE players SET rating=? WHERE guild_id=? AND id=?",rating,guildId,playerId);
             } else {
                 execute(c, "INSERT INTO players(guild_id,name,rating,roster_order) SELECT ?,?,?,COALESCE(MAX(roster_order),-1)+1 FROM players WHERE guild_id=?",
                         guildId, clean, rating, guildId);
                 playerId = lastId(c);
-                seedRatingBaselines(c,guildId);
             }
             if (pollId != null) execute(c, "INSERT INTO rating_polls(id,guild_id,player_id,updated_at) VALUES(?,?,?,?)",
                     pollId, guildId, playerId, timestamp(Instant.now()));
@@ -319,7 +263,7 @@ final class FootballStore {
         if (scores.isEmpty()) throw new FootballException("At least one vote is required to finish voting.");
         double average=scores.stream().mapToDouble(Double::doubleValue).average().orElseThrow();
         execute(c,"UPDATE rating_polls SET vote_count=?,average=?,status=?,updated_at=? WHERE guild_id=? AND id=?",scores.size(),average,close ? "CLOSED" : "OPEN",timestamp(Instant.now()),guildId,poll.id());
-        if (!close) overrideRating(c,guildId,poll.playerId(),average);
+        execute(c,"UPDATE players SET rating=? WHERE guild_id=? AND id=?",average,guildId,poll.playerId());
         if (close) execute(c,"DELETE FROM rating_votes WHERE poll_id=?",poll.id());
     }
     void closeNativePoll(String guildId,String id) {
@@ -363,7 +307,7 @@ final class FootballStore {
             if (!poll.status().equals("OPEN")) throw new FootballException("Create the Google Form first.");
             execute(c,"UPDATE rating_polls SET vote_count=?,average=?,status=?,updated_at=? WHERE guild_id=? AND id=?",
                     scores.size(),average,closed ? "CLOSED" : "OPEN",timestamp(Instant.now()),guildId,id);
-            overrideRating(c,guildId,poll.playerId(),average == null ? 0.0 : average);
+            execute(c,"UPDATE players SET rating=? WHERE guild_id=? AND id=?",average == null ? 0.0 : average,guildId,poll.playerId());
             // Queue cleanup in the same transaction as the final saved rating.
             if (closed) execute(c,"INSERT OR IGNORE INTO rating_cleanup(poll_id,guild_id) VALUES(?,?)",id,guildId);
             return null;
@@ -606,7 +550,6 @@ final class FootballStore {
             if (!draft.action().equals("CREATE") && !authorizedToModify) throw new FootballException("You are not authorized to edit or delete matches.");
             if (draft.status().equals("CONFIRMED")) throw new FootballException("This operation has already been confirmed.");
             if (!draft.status().equals("READY")) throw new FootballException("Submit a score and review it before confirming.");
-            initializeRatingScope(c,guildId);
             long matchId;
             if (draft.action().equals("CREATE")) {
                 if (divisionHasMatch(c, draft.divisionId())) throw new FootballException("This division already has a recorded match.");
@@ -625,7 +568,6 @@ final class FootballStore {
                 else execute(c, "DELETE FROM matches WHERE guild_id=? AND id=? AND version=?", guildId, matchId, draft.targetVersion());
             }
             execute(c, "UPDATE drafts SET status='CONFIRMED',confirmed_match_id=? WHERE id=?", matchId, id);
-            replayRatings(c,guildId);
             return matchId;
         });
     }
@@ -647,10 +589,8 @@ final class FootballStore {
         transaction(c -> {
             Match match=match(c,guildId,id);
             if (match.version()!=expectedVersion) throw new FootballException("This game changed. Refresh and review it before deleting.");
-            initializeRatingScope(c,guildId);
             execute(c,"DELETE FROM matches WHERE guild_id=? AND id=? AND version=?",guildId,id,expectedVersion);
             execute(c,"UPDATE drafts SET status='CANCELLED',revision=revision+1 WHERE guild_id=? AND confirmed_match_id=? AND action='CREATE' AND status='CONFIRMED'",guildId,id);
-            replayRatings(c,guildId);
             return null;
         });
     }

@@ -42,9 +42,8 @@ function addPlayer(array $b,bool $voting): array {
  $rating=$voting?0.0:score($b['rating']??null);
  $old=row('SELECT p.*,r.player_id AS removed FROM players p LEFT JOIN removed_players r ON r.guild_id=p.guild_id AND r.player_id=p.id WHERE p.guild_id=? AND LOWER(p.name)=LOWER(?)',[gid(),$name]);
  if($old&&!$old['removed'])fail('A player with that name already exists.');
- if($old){$name=$old['name'];$id=(string)$old['id'];sql('DELETE FROM rating_polls WHERE guild_id=? AND player_id=?',[gid(),$id]);sql('DELETE FROM removed_players WHERE guild_id=? AND player_id=?',[gid(),$id]);overridePlayerRating($id,$rating);}
+ if($old){$name=$old['name'];$id=(string)$old['id'];sql('DELETE FROM rating_polls WHERE guild_id=? AND player_id=?',[gid(),$id]);sql('DELETE FROM removed_players WHERE guild_id=? AND player_id=?',[gid(),$id]);sql('UPDATE players SET name=?,rating=? WHERE guild_id=? AND id=?',[$name,$rating,gid(),$id]);}
  else{$order=(int)(row('SELECT COALESCE(MAX(roster_order),-1)+1 AS n FROM players WHERE guild_id=?',[gid()])['n']);sql('INSERT INTO players(guild_id,name,rating,roster_order) VALUES(?,?,?,?)',[gid(),$name,$rating,$order]);$id=db()->lastInsertId();}
- seedRatingBaselines();
  $player=['id'=>$id,'name'=>$name,'rating'=>$rating];
  if(!$voting)return $player;
  $poll=uuid();sql("INSERT INTO rating_polls(id,guild_id,player_id,form_url,status,updated_at) VALUES(?,?,?,?,'OPEN',?)",[$poll,gid(),$id,'vote.html?id='.$poll,now()]);sql('INSERT INTO native_polls VALUES(?)',[$poll]);return ['player'=>$player,'poll'=>array_values(array_filter(polls(),fn($p)=>$p['id']===$poll))[0]];
@@ -56,7 +55,7 @@ function vote(string $method,array $b): array {
  if($method==='POST'){
   if($r['status']!=='OPEN')fail('Voting has finished.');$s=score($b['score']??null);
   sql('INSERT INTO rating_votes VALUES(?,?,?) ON DUPLICATE KEY UPDATE score=VALUES(score)',[$id,$voter,$s]);$avg=row('SELECT COUNT(*) AS n,AVG(score) AS avg FROM rating_votes WHERE poll_id=?',[$id]);
-  sql('UPDATE rating_polls SET vote_count=?,average=?,updated_at=? WHERE id=?',[$avg['n'],$avg['avg'],now(),$id]);overridePlayerRating((string)$r['player_id'],(float)$avg['avg']);$r['vote_count']=$avg['n'];$r['average']=$avg['avg'];
+  sql('UPDATE rating_polls SET vote_count=?,average=?,updated_at=? WHERE id=?',[$avg['n'],$avg['avg'],now(),$id]);sql('UPDATE players SET rating=? WHERE guild_id=? AND id=?',[$avg['avg'],gid(),$r['player_id']]);$r['vote_count']=$avg['n'];$r['average']=$avg['avg'];
  }
  $own=row('SELECT score FROM rating_votes WHERE poll_id=? AND voter_id=?',[$id,$voter]);return ['name'=>$r['name'],'status'=>$r['status'],'count'=>(int)$r['vote_count'],'average'=>$r['average']===null?null:(float)$r['average'],'ownScore'=>$own?(float)$own['score']:null];
 }
@@ -85,7 +84,7 @@ function confirm(array $b): array {
  foreach(rows('SELECT * FROM matches WHERE guild_id=? AND played_at=?',[gid(),$d['played_at']]) as $m){$other=division((string)$m['division_id']);
   if(($m['goals_a']==$d['goals_a']&&$m['goals_b']==$d['goals_b']&&sameIds($div['teamA'],$other['teamA'])&&sameIds($div['teamB'],$other['teamB']))||($m['goals_a']==$d['goals_b']&&$m['goals_b']==$d['goals_a']&&sameIds($div['teamA'],$other['teamB'])&&sameIds($div['teamB'],$other['teamA'])))fail('This game has already been logged.');
  }
- sql('INSERT INTO matches(guild_id,division_id,goals_a,goals_b,played_at,recorded_at,recorded_by) VALUES(?,?,?,?,?,?,?)',[gid(),$d['division_id'],$d['goals_a'],$d['goals_b'],$d['played_at'],now(),'website']);$id=db()->lastInsertId();sql("UPDATE drafts SET status='CONFIRMED',confirmed_match_id=? WHERE id=?",[$id,$d['id']]);replayMatchRatings();return ['id'=>$id];
+ sql('INSERT INTO matches(guild_id,division_id,goals_a,goals_b,played_at,recorded_at,recorded_by) VALUES(?,?,?,?,?,?,?)',[gid(),$d['division_id'],$d['goals_a'],$d['goals_b'],$d['played_at'],now(),'website']);$id=db()->lastInsertId();sql("UPDATE drafts SET status='CONFIRMED',confirmed_match_id=? WHERE id=?",[$id,$d['id']]);return ['id'=>$id];
 }
 function dispatch(string $route,string $method,array $b): array {
  if($route==='/api/voting')return vote($method,$b);
@@ -97,7 +96,7 @@ function dispatch(string $route,string $method,array $b): array {
   $id=identifier($b['id']??null);$rating=score($b['rating']??null);
   if(!in_array($id,array_column(activePlayers(),'id'),true))fail('Player not found.',404);
   sql('DELETE FROM rating_polls WHERE guild_id=? AND player_id=?',[gid(),$id]);
-  overridePlayerRating($id,$rating);
+  sql('UPDATE players SET rating=? WHERE guild_id=? AND id=?',[$rating,gid(),$id]);
   return playerShape(row('SELECT * FROM players WHERE guild_id=? AND id=?',[gid(),$id]));
  case 'POST /api/players/remove':$id=identifier($b['id']??null);if(!in_array($id,array_column(activePlayers(),'id'),true))fail('Player not found.',404);sql('INSERT INTO removed_players VALUES(?,?,?)',[gid(),$id,now()]);return ['ok'=>true];
  case 'GET /api/rating-polls':return ['polls'=>polls()];
@@ -115,7 +114,7 @@ function dispatch(string $route,string $method,array $b): array {
   if($version!==(int)$m['version'])fail('This game changed. Refresh and review it before deleting.',409);
   sql('DELETE FROM matches WHERE guild_id=? AND id=? AND version=?',[gid(),$id,$version]);
   sql("UPDATE drafts SET status='CANCELLED',revision=revision+1 WHERE guild_id=? AND confirmed_match_id=? AND action='CREATE' AND status='CONFIRMED'",[gid(),$id]);
-  replayMatchRatings();return ['ok'=>true];
+  return ['ok'=>true];
  case 'GET /api/history':$page=filter_var($_GET['page']??0,FILTER_VALIDATE_INT);if($page===false||$page<0||$page>100000)fail('Invalid page.');$offset=$page*12;$matches=rows("SELECT * FROM matches WHERE guild_id=? ORDER BY played_at DESC,id DESC LIMIT 13 OFFSET $offset",[gid()]);$more=count($matches)>12;$out=[];foreach(array_slice($matches,0,12) as $r){$d=division((string)$r['division_id']);$out[]=['id'=>(string)$r['id'],'version'=>(int)$r['version'],'playedAt'=>$r['played_at'],'goalsA'=>(int)$r['goals_a'],'goalsB'=>(int)$r['goals_b'],'teamA'=>array_column($d['teamA'],'name'),'teamB'=>array_column($d['teamB'],'name')];}return ['matches'=>$out,'hasMore'=>$more];
  default:fail('Endpoint not found.',404);
  }

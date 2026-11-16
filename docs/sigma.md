@@ -117,8 +117,4 @@ Rebuild with `py tools/build_sigma.py sigma-deploy`, then upload `sigma-deploy/f
 
 The deployment builder versions JavaScript and CSS URLs using a hash of each file. Rebuild and upload the public folder together on every update so browsers fetch matching assets. The “Updated” time in the website indicates a player-data refresh, not a code deployment.
 
-## Enable match-based ratings on an existing database
-
-Back up MariaDB, upload the new deployment folders, then run `php ~/football-private/install.php` over SSH. Do not pass `--import` for this upgrade. The installer removes previous game adjustments using the saved starting ratings and manual or voting changes. It records a cutoff so only games newly confirmed after the upgrade affect ratings. Running the installer again preserves the same cutoff. The Java backend performs the same migration when it initializes the guild. Update any Java server or Discord bot sharing the database before using it again so that all writers maintain ratings.
-
-Confirmed results update ratings in the same transaction as the game. Corrections, newly logged backdated results and deletions replay only the matches eligible for rating changes. Deleting a game that affected ratings removes its contribution and recalculates any later effects. Manual scores and vote averages recorded after the upgrade take effect at the time they are saved.
+Game results no longer change player ratings. Upload the updated private code to disable those changes. No database migration is required, and existing ratings are left intact. Update any Java website or Discord bot sharing the database as well.

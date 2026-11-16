@@ -34,6 +34,4 @@ try {
    foreach($catalogue as $name=>$rating)sql('INSERT INTO players(guild_id,name,rating,roster_order) VALUES(?,?,?,?)',[gid(),$name,$rating,$order++]);
   });echo "Schema ready. Existing data retained.\n";
  }else throw new RuntimeException('Usage: php install.php [--import /private/path/export.json]');
- transaction(fn()=>initializeRatingScope());
- echo "Match ratings ready. Only games logged after the cutover count toward ratings.\n";
 } catch(Throwable $e){fwrite(STDERR,'Install failed: '.$e->getMessage()."\n");exit(1);}

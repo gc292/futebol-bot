@@ -23,15 +23,18 @@ class GameManagementTest {
  Map<String,Object> game(){var p=store.players("guild");return new HashMap<>(Map.of("teamA",p.subList(0,5).stream().map(Player::id).toList(),"teamB",p.subList(5,10).stream().map(Player::id).toList(),"goalsA",4,"goalsB",2,"playedAt",Instant.now().minusSeconds(3600).toString()));}
  @Test void publicBrowsingAndProtectedLoggingDeletionRecalculateStats() throws Exception {
   assertEquals(200,request("/api/players",null).statusCode());assertEquals(200,request("/api/history",null).statusCode());
+  var initialPlayers=store.players("guild");
   var body=game();assertEquals(403,request("/api/results/review",body).statusCode());body.put("password","wrong");assertEquals(403,request("/api/results/review",body).statusCode());
   assertTrue(store.matches("guild",null,0,10).isEmpty());body.put("password",PASSWORD);var response=request("/api/results/review",body);assertEquals(200,response.statusCode(),response.body());var d=json(response);
   var confirm=new HashMap<String,Object>(Map.of("draftId",d.get("draftId").getAsString(),"revision",d.get("revision").getAsInt()));
   assertEquals(403,request("/api/results/confirm",confirm).statusCode());assertTrue(store.matches("guild",null,0,10).isEmpty());
   confirm.put("password",PASSWORD);response=request("/api/results/confirm",confirm);assertEquals(200,response.statusCode(),response.body());long id=json(response).get("id").getAsLong();
+  assertEquals(initialPlayers,store.players("guild"));
   long winner=store.players("guild").get(0).id();assertEquals(1,new StatisticsService(store).profile("guild",winner).wins());
   assertEquals(403,request("/api/results/delete",Map.of("id",id,"version",1)).statusCode());
   assertEquals(400,request("/api/results/delete",Map.of("id",id,"version",2,"password",PASSWORD)).statusCode());assertEquals(1,store.matches("guild",null,0,10).size());
   assertEquals(200,request("/api/results/delete",Map.of("id",id,"version",1,"password",PASSWORD)).statusCode());
+  assertEquals(initialPlayers,store.players("guild"));
   assertEquals(0,new StatisticsService(store).profile("guild",winner).gamesPlayed());assertTrue(store.matches("guild",null,0,10).isEmpty());
   assertEquals(400,request("/api/results/confirm",confirm).statusCode());
   assertEquals(5,store.division("guild",store.draft("guild","website",d.get("draftId").getAsString()).divisionId()).teamA().size());
@@ -39,6 +42,7 @@ class GameManagementTest {
  @Test void staleVersionsAndOtherGuildsCannotDeleteChangedGames() throws Exception {
   var body=game();body.put("password",PASSWORD);var d=json(request("/api/results/review",body));
   long id=json(request("/api/results/confirm",Map.of("draftId",d.get("draftId").getAsString(),"revision",d.get("revision").getAsInt(),"password",PASSWORD))).get("id").getAsLong();
+  var playersBeforeEdit=store.players("guild");
   var edit=store.beginChange("guild","discord","channel",id,false);edit=store.score("guild","discord",edit.id(),2,2,edit.playedAt(),edit.revision());store.confirm("guild","discord",edit.id(),edit.revision(),true);
   assertEquals(400,request("/api/results/delete",Map.of("id",id,"version",1,"password",PASSWORD)).statusCode());assertEquals(2,store.match("guild",id).version());
   assertThrows(FootballException.class,()->store.deleteMatch("other-guild",id,2));
